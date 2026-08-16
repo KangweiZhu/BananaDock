@@ -28,19 +28,32 @@ QtObject {
     }
 
     // -- Icons -----------------------------------------------------------
-    property real tileSize: 64        // [known] resting icon edge, Apple default 64pt
-    property real largeSize: 128      // [known] magnified peak edge, Apple default 128pt
+    // tileSize is the layout PITCH -- the centre-to-centre spacing of icons --
+    // not the size of the icon artwork. The reference shows those differ.
+    property real tileSize: 64        // [known] Apple default tile pitch, 64pt
+    property real largeSize: 128      // [known] magnified peak pitch, Apple default 128pt
+
+    // [derived] Icon artwork is smaller than its tile, leaving gaps between
+    // icons. Ratio measured off the WWDC25 reference: iconArt/pitch = 45/67.
+    property real iconSizeRatio: 0.67
+    readonly property real iconSize: tileSize * iconSizeRatio
     property real magnificationRange: 2.5  // [measure] influence radius, in tiles
 
     property bool magnificationEnabled: true
 
     // -- Panel -----------------------------------------------------------
     property real panelPaddingH: 8    // [measure] horizontal inner padding
-    property real panelPaddingV: 8    // [measure] vertical inner padding
     property real panelBottomGap: 8   // [measure] gap between panel and screen edge
 
-    // Panel height follows from the icon size and padding; not configured separately.
-    readonly property real panelHeight: tileSize + panelPaddingV * 2
+    // [derived] Panel height relative to the tile pitch, measured off the
+    // reference as 89/67. With the 64pt default pitch this gives an 85pt panel.
+    property real panelHeightRatio: 1.33
+    readonly property real panelHeight: tileSize * panelHeightRatio
+
+    // [derived] Icons sit slightly above centre; the extra room underneath is
+    // where the running dots go. Reference: 20px above, 24px below, of 89px.
+    property real iconTopPadRatio: 0.225
+    readonly property real iconBottomMargin: panelHeight * (1.0 - iconTopPadRatio) - iconSize
 
     // [reference] Tahoe's dock is a capsule -- the end caps are semicircular, so
     // the radius is exactly half the height. Measured off Apple's WWDC25 press
@@ -63,7 +76,7 @@ QtObject {
 
     // -- Running indicator dot -------------------------------------------
     property real dotSize: 4          // [measure]
-    property real dotBottomMargin: 4  // [measure] dot centre to panel bottom
+    property real dotBottomMargin: 6  // [measure] dot centre to panel bottom
     property color dotColor: Qt.rgba(1, 1, 1, 0.85)
 
     // -- Animation --------------------------------------------------------
@@ -75,5 +88,13 @@ QtObject {
     readonly property real maxScale: magnificationEnabled ? (largeSize / tileSize) : 1.0
     // The surface must be taller than the panel so magnified icons have room
     // to grow upwards.
-    readonly property real surfaceHeight: pt(largeSize + panelPaddingV * 2 + panelBottomGap + bounceHeight)
+    /// Icon artwork at full magnification.
+    readonly property real maxIconSize: largeSize * iconSizeRatio
+
+    // The surface has to contain the panel, the gap below it, and the headroom a
+    // fully magnified icon needs as it grows upward past the panel's top edge.
+    readonly property real surfaceHeight: pt(panelBottomGap
+                                             + Math.max(panelHeight,
+                                                        iconBottomMargin + maxIconSize)
+                                             + bounceHeight)
 }

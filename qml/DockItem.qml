@@ -17,8 +17,11 @@ Item {
     required property bool isRunning
     required property bool isLauncher
 
-    /// Current edge length, already multiplied by scaleFactor. Set by DockPanel.
+    /// Current tile PITCH in px, already scaled. Set by DockPanel; grows with
+    /// magnification. The icon artwork is a fixed fraction of it.
     property real tilePx: Metrics.pt(Metrics.tileSize)
+
+    readonly property real iconPx: tilePx * Metrics.iconSizeRatio
 
     signal clicked()
 
@@ -31,13 +34,13 @@ Item {
         source: root.iconSource
         smooth: true
 
-        width: root.tilePx
-        height: root.tilePx
+        width: root.iconPx
+        height: root.iconPx
 
         // Icons are bottom-aligned and grow upwards when magnified, as on macOS.
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: Metrics.pt(Metrics.panelPaddingV + Metrics.dotBottomMargin * 2)
+        anchors.bottomMargin: Metrics.pt(Metrics.iconBottomMargin)
     }
 
     // Running-application indicator
@@ -50,7 +53,7 @@ Item {
 
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: Metrics.pt(Metrics.panelPaddingV + Metrics.dotBottomMargin)
+        anchors.bottomMargin: Metrics.pt(Metrics.dotBottomMargin)
     }
 
     TapHandler {
