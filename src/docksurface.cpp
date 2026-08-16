@@ -1,4 +1,5 @@
 #include "docksurface.h"
+#include "blureffect.h"
 
 #include <QQuickWindow>
 #include <QRegion>
@@ -7,8 +8,11 @@
 
 DockSurface::DockSurface(QObject *parent)
     : QObject(parent)
+    , m_blur(std::make_unique<BlurEffect>())
 {
 }
+
+DockSurface::~DockSurface() = default;
 
 void DockSurface::attach(QQuickWindow *window)
 {
@@ -61,4 +65,12 @@ void DockSurface::setInputRegion(int x, int y, int width, int height)
         return;
     }
     m_window->setMask(QRegion(x, y, width, height));
+}
+
+void DockSurface::setBlurRegion(qreal x, qreal y, qreal width, qreal height, qreal radius)
+{
+    if (!m_window || !m_blur) {
+        return;
+    }
+    m_blur->setCapsuleBlurRegion(m_window, QRectF(x, y, width, height), radius);
 }

@@ -37,18 +37,28 @@ QtObject {
     // -- Panel -----------------------------------------------------------
     property real panelPaddingH: 8    // [measure] horizontal inner padding
     property real panelPaddingV: 8    // [measure] vertical inner padding
-    property real panelRadius: 24     // [measure] Tahoe is noticeably rounder than Big Sur's 16
     property real panelBottomGap: 8   // [measure] gap between panel and screen edge
 
     // Panel height follows from the icon size and padding; not configured separately.
     readonly property real panelHeight: tileSize + panelPaddingV * 2
 
+    // [reference] Tahoe's dock is a capsule -- the end caps are semicircular, so
+    // the radius is exactly half the height. Measured off Apple's WWDC25 press
+    // shot; this replaced an earlier guess of a 24pt rounded rectangle.
+    property real panelRadiusRatio: 0.5
+    readonly property real panelRadius: panelHeight * panelRadiusRatio
+
     // -- Material (Liquid Glass) -----------------------------------------
     // The actual blur/frost is composited by KWin behind the surface via the
     // blur + contrast protocols. What follows is only the translucent tint and
     // highlight stroke layered on top of it.
-    property color panelTint: Qt.rgba(1, 1, 1, 0.18)        // [measure]
-    property color panelBorderColor: Qt.rgba(1, 1, 1, 0.28) // [measure] top highlight stroke
+    // [reference] The glass is far more transparent than first assumed -- in the
+    // reference the wallpaper's colour reads clearly through the panel. Most of
+    // the look comes from the compositor's blur, not from this tint, so keep it
+    // light or the blur gets washed out.
+    property color panelTint: Qt.rgba(1, 1, 1, 0.10)
+    // [reference] A bright hairline runs along both the top and bottom edges.
+    property color panelBorderColor: Qt.rgba(1, 1, 1, 0.30)
     property real panelBorderWidth: 1                       // [measure]
 
     // -- Running indicator dot -------------------------------------------

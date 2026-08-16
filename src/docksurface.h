@@ -3,6 +3,10 @@
 #include <QObject>
 #include <QRect>
 
+#include <memory>
+
+class BlurEffect;
+
 class QQuickWindow;
 
 /**
@@ -18,6 +22,7 @@ class DockSurface : public QObject
 
 public:
     explicit DockSurface(QObject *parent = nullptr);
+    ~DockSurface() override;
 
     /// Must be called before window->show(), otherwise Qt creates the surface
     /// with a plain xdg-shell role instead.
@@ -39,7 +44,15 @@ public:
      */
     Q_INVOKABLE void setInputRegion(int x, int y, int width, int height);
 
+    /**
+     * Blurs the compositor's view of whatever sits behind the panel. Takes the
+     * capsule radius so the blur follows the panel's rounded shape instead of
+     * its bounding box.
+     */
+    Q_INVOKABLE void setBlurRegion(qreal x, qreal y, qreal width, qreal height, qreal radius);
+
 private:
     QQuickWindow *m_window = nullptr;
     int m_exclusiveZone = 0;
+    std::unique_ptr<BlurEffect> m_blur;
 };

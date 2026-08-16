@@ -69,6 +69,10 @@ Window {
             Math.round(panel.y),
             Math.round(panel.width),
             Math.round(panel.height));
+
+        // Frosted glass behind the panel, following its capsule outline.
+        DockSurface.setBlurRegion(panel.x, panel.y, panel.width, panel.height,
+                                  Metrics.pt(Metrics.panelRadius));
     }
 
     Component.onCompleted: syncSurface()
