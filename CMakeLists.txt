@@ -45,6 +45,9 @@ qt_add_qml_module(macdock
         qml/Metrics.qml
         qml/DockPanel.qml
         qml/DockItem.qml
+        qml/DockMenu.qml
+        qml/DockMenuItem.qml
+        qml/DockMenuSeparator.qml
 )
 
 target_link_libraries(macdock PRIVATE

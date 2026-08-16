@@ -42,7 +42,8 @@ QtObject {
     property bool magnificationEnabled: true
 
     // -- Auto-hide ---------------------------------------------------------
-    property bool autoHide: true
+    // macOS ships with auto-hide off; match that default.
+    property bool autoHide: false
     property int autoHideDelay: 500   // [measure] ms the pointer must be away
 
     // -- Panel -----------------------------------------------------------
@@ -82,6 +83,23 @@ QtObject {
     property real dotSize: 4          // [measure]
     property real dotBottomMargin: 6  // [measure] dot centre to panel bottom
     property color dotColor: Qt.rgba(1, 1, 1, 0.85)
+
+    // -- Context menu -----------------------------------------------------
+    property real menuRadius: 8          // [measure]
+    property real menuItemHeight: 24     // [measure]
+    property real menuItemPadding: 12    // [measure]
+    property real menuFontSize: 13       // [measure]
+    property color menuBackground: Qt.rgba(0.16, 0.16, 0.17, 0.98)
+    property color menuBorderColor: Qt.rgba(1, 1, 1, 0.12)
+    property color menuText: Qt.rgba(1, 1, 1, 0.92)
+    property color menuHighlightText: Qt.rgba(1, 1, 1, 1.0)
+    property color menuHighlight: Qt.rgba(0.20, 0.48, 0.95, 1.0)
+    property color menuSeparatorColor: Qt.rgba(1, 1, 1, 0.12)
+    property color menuTextDisabled: Qt.rgba(1, 1, 1, 0.35)
+    property real menuHighlightInset: 4   // [measure] highlight inset from menu edge
+    property real menuHighlightRadius: 5  // [measure]
+    property real menuMinWidth: 200       // [measure]
+    property real menuSeparatorMargin: 4  // [measure]
 
     // -- Animation --------------------------------------------------------
     property int magnifyDuration: 90   // [measure] how tightly magnification tracks the cursor

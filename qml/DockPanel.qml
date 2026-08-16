@@ -140,6 +140,43 @@ Item {
         }
     }
 
+    /// Hides every window of the application, as macOS's Hide does.
+    function hideApplication(idx) {
+        if (tasksModel.data(idx, TaskManager.AbstractTasksModel.IsGroupParent) !== true) {
+            if (tasksModel.data(idx, TaskManager.AbstractTasksModel.IsMinimized) !== true) {
+                tasksModel.requestToggleMinimized(idx);
+            }
+            return;
+        }
+
+        const count = tasksModel.rowCount(idx);
+        for (let i = 0; i < count; ++i) {
+            const child = tasksModel.index(i, 0, idx);
+            if (tasksModel.data(child, TaskManager.AbstractTasksModel.IsMinimized) !== true) {
+                tasksModel.requestToggleMinimized(child);
+            }
+        }
+    }
+
+    function openMenu(index, item) {
+        contextMenu.taskIndex = index;
+        // Anchor to the icon and let the menu open upwards; the dock sits at
+        // the bottom of the screen so there is no room below it.
+        const pos = item.mapToItem(root, item.width / 2, 0);
+        contextMenu.x = pos.x - contextMenu.width / 2;
+        contextMenu.y = -contextMenu.height;
+        contextMenu.open();
+    }
+
+    DockMenu {
+        id: contextMenu
+        tasksModel: tasksModel
+
+        onShowAllWindowsRequested: root.raiseApplication(taskIdx,
+            { IsGroupParent: tasksModel.data(taskIdx, TaskManager.AbstractTasksModel.IsGroupParent) })
+        onHideRequested: root.hideApplication(taskIdx)
+    }
+
     onCursorRestXChanged: relayout()
     Component.onCompleted: relayout()
 
@@ -202,6 +239,7 @@ Item {
                 }
 
                 onClicked: root.activateTask(index, model)
+                onRightClicked: root.openMenu(index, this)
             }
         }
     }

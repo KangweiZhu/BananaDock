@@ -29,6 +29,7 @@ Item {
     property real bounceOffset: 0
 
     signal clicked()
+    signal rightClicked()
 
     width: tilePx
     height: parent ? parent.height : tilePx
@@ -97,6 +98,13 @@ Item {
     }
 
     TapHandler {
+        acceptedButtons: Qt.LeftButton
         onTapped: root.clicked()
+    }
+
+    TapHandler {
+        acceptedButtons: Qt.RightButton
+        gesturePolicy: TapHandler.ReleaseWithinBounds
+        onTapped: root.rightClicked()
     }
 }
