@@ -41,6 +41,10 @@ QtObject {
 
     property bool magnificationEnabled: true
 
+    // -- Auto-hide ---------------------------------------------------------
+    property bool autoHide: true
+    property int autoHideDelay: 500   // [measure] ms the pointer must be away
+
     // -- Panel -----------------------------------------------------------
     property real panelPaddingH: 8    // [measure] horizontal inner padding
     property real panelBottomGap: 8   // [measure] gap between panel and screen edge

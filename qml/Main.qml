@@ -45,22 +45,39 @@ Window {
         }
     }
 
-    // Collapse the magnification once the pointer leaves the panel.
+    // Collapse the magnification once the pointer leaves the panel, and start
+    // the auto-hide countdown.
     HoverHandler {
         id: windowHover
         onHoveredChanged: {
-            if (!windowHover.hovered) {
+            if (windowHover.hovered) {
+                hideTimer.stop();
+                if (Metrics.autoHide) {
+                    DockSurface.setHidden(false);
+                }
+            } else {
                 panel.cursorRestX = -1;
+                if (Metrics.autoHide) {
+                    hideTimer.restart();
+                }
             }
         }
+    }
+
+    Timer {
+        id: hideTimer
+        interval: Metrics.autoHideDelay
+        onTriggered: DockSurface.setHidden(true)
     }
 
     // -- Keeping the compositor in sync ------------------------------------
     function syncSurface() {
         // Windows only need to avoid the panel at rest, not the magnification
-        // headroom above it -- same as macOS.
-        DockSurface.setExclusiveZone(
-            Math.round(Metrics.pt(Metrics.panelHeight + Metrics.panelBottomGap)));
+        // headroom above it -- same as macOS. An auto-hiding dock reserves
+        // nothing, so windows get the full screen.
+        DockSurface.setExclusiveZone(Metrics.autoHide
+            ? 0
+            : Math.round(Metrics.pt(Metrics.panelHeight + Metrics.panelBottomGap)));
 
         // Only the panel rectangle takes pointer events; everything else is
         // transparent to the windows underneath.
@@ -75,7 +92,12 @@ Window {
                                   Metrics.pt(Metrics.panelRadius));
     }
 
-    Component.onCompleted: syncSurface()
+    Component.onCompleted: {
+        syncSurface();
+        if (Metrics.autoHide) {
+            hideTimer.restart();
+        }
+    }
 
     Connections {
         target: panel

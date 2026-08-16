@@ -1,5 +1,6 @@
 #include "docksurface.h"
 #include "blureffect.h"
+#include "screenedge.h"
 
 #include <QQuickWindow>
 #include <QRegion>
@@ -9,6 +10,7 @@
 DockSurface::DockSurface(QObject *parent)
     : QObject(parent)
     , m_blur(std::make_unique<BlurEffect>())
+    , m_edge(std::make_unique<ScreenEdge>())
 {
 }
 
@@ -46,6 +48,21 @@ void DockSurface::attach(QQuickWindow *window)
     layerWindow->setKeyboardInteractivity(LayerShellQt::Window::KeyboardInteractivityNone);
 
     layerWindow->setExclusiveZone(m_exclusiveZone);
+}
+
+void DockSurface::setHidden(bool hidden)
+{
+    if (!m_window || !m_edge) {
+        return;
+    }
+    // The edge can only be created after the surface has its layer_surface role.
+    m_edge->attach(m_window);
+    m_edge->setHidden(hidden);
+}
+
+bool DockSurface::autoHideSupported() const
+{
+    return m_edge && m_edge->isAvailable();
 }
 
 void DockSurface::setExclusiveZone(int zone)

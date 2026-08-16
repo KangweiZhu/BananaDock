@@ -6,6 +6,7 @@
 #include <memory>
 
 class BlurEffect;
+class ScreenEdge;
 
 class QQuickWindow;
 
@@ -51,8 +52,16 @@ public:
      */
     Q_INVOKABLE void setBlurRegion(qreal x, qreal y, qreal width, qreal height, qreal radius);
 
+    /// Hides the dock and arms the bottom screen edge; the compositor slides it
+    /// back in when the pointer gets there. No-op if the protocol is missing.
+    Q_INVOKABLE void setHidden(bool hidden);
+
+    /// Whether the compositor offers auto-hide at all.
+    Q_INVOKABLE bool autoHideSupported() const;
+
 private:
     QQuickWindow *m_window = nullptr;
     int m_exclusiveZone = 0;
     std::unique_ptr<BlurEffect> m_blur;
+    std::unique_ptr<ScreenEdge> m_edge;
 };

@@ -20,12 +20,16 @@ qt_add_executable(macdock
     src/docksurface.h
     src/blureffect.cpp
     src/blureffect.h
+    src/screenedge.cpp
+    src/screenedge.h
 )
 
 # Generates qwayland-ext-background-effect-v1.h -- the client bindings for the
 # compositor-side blur behind the dock panel.
 qt_generate_wayland_protocol_client_sources(macdock
-    FILES /usr/share/wayland-protocols/staging/ext-background-effect/ext-background-effect-v1.xml
+    FILES
+        /usr/share/wayland-protocols/staging/ext-background-effect/ext-background-effect-v1.xml
+        /usr/share/plasma-wayland-protocols/kde-screen-edge-v1.xml
 )
 
 # Metrics is a singleton holding every pixel value. This must be declared
