@@ -16,12 +16,17 @@ Item {
     required property var iconSource
     required property bool isRunning
     required property bool isLauncher
+    /// True while the application is starting up; drives the launch bounce.
+    required property bool isStarting
 
     /// Current tile PITCH in px, already scaled. Set by DockPanel; grows with
     /// magnification. The icon artwork is a fixed fraction of it.
     property real tilePx: Metrics.pt(Metrics.tileSize)
 
     readonly property real iconPx: tilePx * Metrics.iconSizeRatio
+
+    /// Height of the launch bounce above the resting position, in px.
+    property real bounceOffset: 0
 
     signal clicked()
 
@@ -40,7 +45,42 @@ Item {
         // Icons are bottom-aligned and grow upwards when magnified, as on macOS.
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: Metrics.pt(Metrics.iconBottomMargin)
+        anchors.bottomMargin: Metrics.pt(Metrics.iconBottomMargin) + root.bounceOffset
+    }
+
+    /**
+     * Launch bounce.
+     *
+     * The rise and the fall get opposite easings rather than one symmetric
+     * curve: a real jump decelerates on the way up and accelerates on the way
+     * down. Easing both halves the same way reads as floaty.
+     */
+    SequentialAnimation {
+        running: root.isStarting
+        loops: Animation.Infinite
+        // Let the current hop land instead of freezing the icon mid-air when
+        // the app finishes starting.
+        alwaysRunToEnd: true
+
+        NumberAnimation {
+            target: root
+            property: "bounceOffset"
+            to: Metrics.pt(Metrics.bounceHeight)
+            duration: Metrics.bounceDuration * 0.45
+            easing.type: Easing.OutQuad
+        }
+        NumberAnimation {
+            target: root
+            property: "bounceOffset"
+            to: 0
+            duration: Metrics.bounceDuration * 0.55
+            easing.type: Easing.InQuad
+        }
+        PauseAnimation {
+            duration: Metrics.bounceRestDuration
+        }
+
+        onStopped: root.bounceOffset = 0
     }
 
     // Running-application indicator

@@ -85,7 +85,8 @@ QtObject {
 
     // -- Animation --------------------------------------------------------
     property int magnifyDuration: 90   // [measure] how tightly magnification tracks the cursor
-    property int bounceDuration: 620   // [measure] one launch bounce
+    property int bounceDuration: 620      // [measure] one launch hop
+    property int bounceRestDuration: 180  // [measure] pause between hops
     property real bounceHeight: 28     // [measure]
 
     // -- Derived ----------------------------------------------------------

@@ -83,6 +83,63 @@ Item {
         root.contentWidth = total;
     }
 
+    /**
+     * Click behaviour, following macOS rather than the usual taskbar rules.
+     *
+     * Notably macOS never minimises an application from its dock icon -- that
+     * is a Windows/Linux taskbar convention. Clicking the frontmost app instead
+     * restores whatever windows of it are minimised.
+     */
+    function activateTask(index, item) {
+        const idx = tasksModel.index(index, 0);
+
+        // Not running yet: launching it produces a startup task, which is what
+        // drives the bounce.
+        if (item.IsLauncher === true) {
+            tasksModel.requestActivate(idx);
+            return;
+        }
+
+        if (item.IsActive === true) {
+            root.restoreMinimised(idx, item);
+            return;
+        }
+
+        root.raiseApplication(idx, item);
+    }
+
+    /// Brings every window of the application forward, not just the most
+    /// recently used one -- on macOS the whole app comes to the front.
+    function raiseApplication(idx, item) {
+        if (item.IsGroupParent !== true) {
+            tasksModel.requestActivate(idx);
+            return;
+        }
+
+        // Activate back-to-front so the most recent window ends up focused.
+        const count = tasksModel.rowCount(idx);
+        for (let i = count - 1; i >= 0; --i) {
+            tasksModel.requestActivate(tasksModel.index(i, 0, idx));
+        }
+    }
+
+    function restoreMinimised(idx, item) {
+        if (item.IsGroupParent !== true) {
+            if (item.IsMinimized === true) {
+                tasksModel.requestToggleMinimized(idx);
+            }
+            return;
+        }
+
+        const count = tasksModel.rowCount(idx);
+        for (let i = 0; i < count; ++i) {
+            const child = tasksModel.index(i, 0, idx);
+            if (tasksModel.data(child, TaskManager.AbstractTasksModel.IsMinimized) === true) {
+                tasksModel.requestToggleMinimized(child);
+            }
+        }
+    }
+
     onCursorRestXChanged: relayout()
     Component.onCompleted: relayout()
 
@@ -120,6 +177,7 @@ Item {
                 iconSource: model.decoration
                 isRunning: model.IsWindow === true || model.IsGroupParent === true
                 isLauncher: model.IsLauncher === true
+                isStarting: model.IsStartup === true
 
                 tilePx: root.itemWidths[index] !== undefined
                         ? root.itemWidths[index]
@@ -143,7 +201,7 @@ Item {
                     }
                 }
 
-                onClicked: tasksModel.requestActivate(tasksModel.index(index, 0))
+                onClicked: root.activateTask(index, model)
             }
         }
     }
