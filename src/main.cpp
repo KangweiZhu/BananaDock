@@ -3,6 +3,7 @@
 #include <QQmlContext>
 #include <QQuickWindow>
 #include <QScreen>
+#include <QStandardPaths>
 
 
 #include "docksurface.h"
@@ -31,6 +32,14 @@ int main(int argc, char *argv[])
 
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("DockSurface"), &surface);
+
+    // Resolved here rather than in QML: a QML singleton cannot read context
+    // properties, and QtCore's QML module does not expose StandardPaths. Going
+    // through QStandardPaths also honours XDG_DATA_HOME.
+    engine.rootContext()->setContextProperty(
+        QStringLiteral("TrashPath"),
+        QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation)
+            + QStringLiteral("/Trash/files"));
     engine.loadFromModule("MacDock", "Main");
 
     if (engine.rootObjects().isEmpty()) {

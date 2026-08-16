@@ -84,6 +84,13 @@ QtObject {
     property real dotBottomMargin: 6  // [measure] dot centre to panel bottom
     property color dotColor: Qt.rgba(1, 1, 1, 0.85)
 
+    // -- Trash and separator ----------------------------------------------
+    property bool showTrash: true
+    property real separatorWidth: 20      // [measure] slot width taken by a separator
+    property real separatorLineWidth: 1   // [measure]
+    property real separatorInset: 14      // [measure] vertical inset of the line
+    property color separatorColor: Qt.rgba(1, 1, 1, 0.25)
+
     // -- Context menu -----------------------------------------------------
     property real menuRadius: 8          // [measure]
     property real menuItemHeight: 24     // [measure]
