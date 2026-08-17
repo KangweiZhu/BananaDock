@@ -236,7 +236,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         trash_dir,
         metrics,
         palette: Palette::default(),
-        cursor_rest_x: None,
+        pointer_surface_x: None,
         current_widths: Vec::new(),
         last_frame_ms: None,
         frame_pending: false,
@@ -625,7 +625,13 @@ struct App {
 
     /// Pointer position in *resting-layout* coordinates, or `None` when the
     /// pointer is away and the row should collapse.
-    cursor_rest_x: Option<f32>,
+    /// Pointer position in *surface* coordinates, not resting-layout ones.
+    ///
+    /// The conversion depends on how wide the row is, so storing the converted
+    /// value would go stale the moment a tile joins or leaves: the row
+    /// re-centres, and a magnification bulge computed against the old origin
+    /// detaches from the pointer and hangs where the row used to be.
+    pointer_surface_x: Option<f32>,
     /// Widths actually drawn. Eased toward the target layout rather than
     /// snapped to it, so the row glides instead of jumping between frames.
     current_widths: Vec<f32>,
@@ -844,10 +850,20 @@ impl App {
     /// Mapping through the live origin would let the row's own deformation move
     /// the coordinate that drives that deformation -- a feedback loop that
     /// makes the icons shimmer under a stationary pointer.
+    /// The pointer in resting-layout coordinates, for the row as it is *now*.
+    ///
+    /// Derived on demand rather than stored: the row changes width as tiles
+    /// come and go, and a converted value cached at pointer-event time would
+    /// then describe a place the pointer is no longer at.
+    fn cursor_rest_x(&self, slots: &[Slot]) -> Option<f32> {
+        self.pointer_surface_x
+            .map(|x| x - self.rest_origin_x(slots))
+    }
+
     fn rest_origin_x(&self, slots: &[Slot]) -> f32 {
         let pad = self.metrics.pt(self.metrics.panel_padding_h);
         let rest_content: f32 = self.slot_metrics(slots).iter().map(|s| s.rest_width).sum();
-        (self.dock.width as f32 - (rest_content + pad * 2.0)) / 2.0 + pad
+        layout::rest_origin_x(self.dock.width as f32, rest_content, pad)
     }
 
     /// Positions for the widths currently drawn, accounting for a drag.
@@ -890,7 +906,7 @@ impl App {
         let cursor = if self.drag.is_some() {
             None
         } else {
-            self.cursor_rest_x
+            self.cursor_rest_x(&slots)
         };
         let mut metrics = self.slot_metrics(&slots);
         // A tile on its way out is heading for no width at all; everything else
@@ -2111,14 +2127,13 @@ impl PointerHandler for App {
             match event.kind {
                 PointerEventKind::Enter { .. } | PointerEventKind::Motion { .. } => {
                     let slots = self.slots();
-                    let rest_x = event.position.0 as f32 - self.rest_origin_x(&slots);
-                    self.cursor_rest_x = Some(rest_x);
+                    self.pointer_surface_x = Some(event.position.0 as f32);
                     self.left_at = None;
                     self.update_drag(event.position.0 as f32, event.position.1 as f32, &slots);
                     changed = true;
                 }
                 PointerEventKind::Leave { .. } => {
-                    self.cursor_rest_x = None;
+                    self.pointer_surface_x = None;
                     self.left_at = Some(Instant::now());
                     changed = true;
                 }

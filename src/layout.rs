@@ -164,6 +164,16 @@ pub fn insert_index(slots: &[SlotMetrics], from: usize, pointer_x: f32) -> usize
     index
 }
 
+/// Left edge of the row when nothing is magnified.
+///
+/// The row is centred, so this moves whenever the row's resting width changes
+/// -- which is what makes caching a pointer position converted through it a
+/// trap: a tile joining or leaving shifts the origin, and a value converted
+/// before the change then describes somewhere the pointer is not.
+pub fn rest_origin_x(surface_w: f32, rest_content_w: f32, padding: f32) -> f32 {
+    (surface_w - (rest_content_w + padding * 2.0)) / 2.0 + padding
+}
+
 /// Moves `current` toward `target` by one frame's worth of easing.
 ///
 /// Exponential rather than a fixed-duration tween because the target moves
@@ -413,6 +423,37 @@ mod tests {
             (5.0..30.0).contains(&after),
             "expected a small first step, got {after}"
         );
+    }
+
+    /// Losing a tile shifts the resting origin by half that tile, because the
+    /// row stays centred. A pointer position converted before the change and
+    /// reused after it is therefore off by exactly that much -- the reason the
+    /// conversion is done on demand rather than stored.
+    #[test]
+    fn the_resting_origin_moves_when_the_row_loses_a_tile() {
+        let (surface, pad, tile) = (1920.0, 8.0, 64.0);
+        let before = rest_origin_x(surface, tile * 4.0, pad);
+        let after = rest_origin_x(surface, tile * 3.0, pad);
+
+        assert!(
+            (after - before - tile / 2.0).abs() < 0.01,
+            "{before} -> {after}"
+        );
+    }
+
+    /// The same physical pointer position has to keep meaning the same place.
+    #[test]
+    fn converting_on_demand_keeps_the_pointer_where_it_is() {
+        let (surface, pad, tile) = (1920.0, 8.0, 64.0);
+        let pointer = 1000.0;
+
+        let wide = pointer - rest_origin_x(surface, tile * 4.0, pad);
+        let narrow = pointer - rest_origin_x(surface, tile * 3.0, pad);
+
+        // Different resting coordinates, but both name the same screen pixel.
+        assert!(wide > narrow);
+        assert!((wide + rest_origin_x(surface, tile * 4.0, pad) - pointer).abs() < 0.01);
+        assert!((narrow + rest_origin_x(surface, tile * 3.0, pad) - pointer).abs() < 0.01);
     }
 
     #[test]
