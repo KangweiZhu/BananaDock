@@ -1194,19 +1194,30 @@ impl App {
         let row_x = panel.x() + self.metrics.pt(self.metrics.panel_padding_h);
         let surface = self.dock.layer().wl_surface();
 
-        for (slot, geom) in slots.iter().zip(&geometry.slots) {
-            if slot.windows.is_empty() {
+        // While a window is minimised, the thing in the dock that stands for it
+        // is its own tile, not its application's icon. Reporting both would
+        // leave the compositor to pick, and KWin animates from whichever it was
+        // told about when the window went away -- which is the application icon
+        // unless the application's tile is kept quiet.
+        let minimized: Vec<crate::windows::ToplevelId> = self
+            .windows()
+            .toplevels()
+            .iter()
+            .filter(|t| t.minimized)
+            .map(|t| t.id)
+            .collect();
+
+        for (index, id) in model::icon_rect_targets(slots, &minimized) {
+            let Some(geom) = geometry.slots.get(index) else {
                 continue;
-            }
+            };
             let rect = (
                 (row_x + geom.x).round() as i32,
                 panel.y().round() as i32,
                 geom.width.round() as i32,
                 panel.height().round() as i32,
             );
-            for &id in &slot.windows {
-                self.windows().set_icon_rect(id, surface, rect);
-            }
+            self.windows().set_icon_rect(id, surface, rect);
         }
     }
 

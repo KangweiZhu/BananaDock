@@ -203,6 +203,36 @@ pub fn build_slots_with(
     slots
 }
 
+/// Which tile stands for each window, for the compositor's minimise animation.
+///
+/// A window must be reported exactly once. While it is minimised its tile is
+/// the one that represents it, not its application's icon -- reporting both
+/// leaves the compositor to choose, and KWin animates towards whichever it
+/// heard about last before the window went away.
+///
+/// Returns `(slot index, window id)` pairs, in slot order.
+pub fn icon_rect_targets(slots: &[Slot], minimized: &[ToplevelId]) -> Vec<(usize, ToplevelId)> {
+    // Windows that have a tile of their own. Suppressing the application icon
+    // for a minimised window only makes sense when something else took over --
+    // with the separate tiles switched off, the icon is all there is.
+    let has_own_tile: Vec<ToplevelId> = slots
+        .iter()
+        .filter(|s| s.kind == SlotKind::MinimizedWindow)
+        .flat_map(|s| s.windows.iter().copied())
+        .collect();
+
+    let mut out = Vec::new();
+    for (i, slot) in slots.iter().enumerate() {
+        for &id in &slot.windows {
+            if slot.kind == SlotKind::App && minimized.contains(&id) && has_own_tile.contains(&id) {
+                continue;
+            }
+            out.push((i, id));
+        }
+    }
+    out
+}
+
 /// Whether the Trash currently holds anything.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TrashState {
@@ -383,6 +413,43 @@ mod tests {
             slots.iter().map(|s| s.kind).collect::<Vec<_>>(),
             vec![SlotKind::Trash]
         );
+    }
+
+    /// A minimised window is represented by its own tile, and only by that.
+    #[test]
+    fn a_minimized_window_is_reported_once_and_by_its_own_tile() {
+        let tops = vec![minimized(1, "myapp", "Doc")];
+        let slots = build_slots(&[], &tops, &LauncherIndex::default(), None);
+        let targets = icon_rect_targets(&slots, &[1]);
+
+        assert_eq!(targets.len(), 1, "reported more than once: {targets:?}");
+        let (index, id) = targets[0];
+        assert_eq!(id, 1);
+        assert_eq!(slots[index].kind, SlotKind::MinimizedWindow);
+    }
+
+    /// A window that is *not* minimised is represented by its application tile.
+    #[test]
+    fn a_visible_window_is_reported_by_its_application_tile() {
+        let tops = vec![toplevel(1, "myapp", true)];
+        let slots = build_slots(&[], &tops, &LauncherIndex::default(), None);
+        let targets = icon_rect_targets(&slots, &[]);
+
+        assert_eq!(targets.len(), 1);
+        assert_eq!(slots[targets[0].0].kind, SlotKind::App);
+    }
+
+    /// With the separate tiles switched off there is no other tile to fall back
+    /// on, so the application icon has to keep reporting -- otherwise the
+    /// window would animate towards nowhere.
+    #[test]
+    fn folded_minimized_windows_still_report_through_the_app_tile() {
+        let tops = vec![minimized(1, "myapp", "Doc")];
+        let slots = build_slots_with(&[], &tops, &LauncherIndex::default(), None, false);
+        let targets = icon_rect_targets(&slots, &[1]);
+
+        assert_eq!(targets.len(), 1);
+        assert_eq!(slots[targets[0].0].kind, SlotKind::App);
     }
 
     #[test]
