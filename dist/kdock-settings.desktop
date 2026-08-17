@@ -8,3 +8,12 @@ Exec=/usr/bin/kdock --settings
 Icon=configure
 Terminal=false
 Categories=Settings;DesktopSettings;
+# The same declarations as kdock.desktop, and they are not optional here.
+#
+# KWin decides what a client may use by tracing its process back to a desktop
+# entry -- by executable path, ignoring arguments. Two entries naming the same
+# binary are both candidates, so an entry without these silently costs the dock
+# its window list: it falls back to driving a KWin script and nothing reports
+# an error.
+X-KDE-Wayland-Interfaces=org_kde_plasma_window_management
+X-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2

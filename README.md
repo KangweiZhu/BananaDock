@@ -127,6 +127,13 @@ for the rest of the session after every compositor restart.
 ```sh
 ```
 
+## Quitting, and the dock's own menu
+
+Right-click the dock -- the separator, or any part of the panel that is not an
+icon -- for magnification and auto-hide toggles, the settings window, and
+**Quit kdock**. The dock has no window and no tray icon, so this is the way out
+short of `systemctl --user stop kdock.service`.
+
 ## Configuration
 
 A settings window covers the common options:

@@ -1133,38 +1133,86 @@ impl App {
     }
 
     /// Opens the context menu for a slot.
-    fn open_menu(&mut self, index: usize, serial: u32, qh: &QueueHandle<Self>) {
+    /// Writes one preference to the config file.
+    ///
+    /// The file watcher picks it up and reloads, so there is no separate path
+    /// for "applying" it.
+    fn write_setting(&mut self, key: &'static str, value: toml_edit::Value) {
+        let Some(path) = self.config_path.clone() else {
+            eprintln!("kdock: no writable configuration directory");
+            return;
+        };
+        if let Err(e) = config::Config::save_settings(&path, &[(key, value)]) {
+            eprintln!("kdock: could not save {}: {e}", path.display());
+        }
+    }
+
+    /// Opens the settings window as a separate process.
+    fn open_settings(&self) {
+        let Ok(exe) = std::env::current_exe() else {
+            return;
+        };
+        match std::process::Command::new(exe)
+            .arg("--settings")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+        {
+            Ok(mut child) => {
+                std::thread::spawn(move || {
+                    let _ = child.wait();
+                });
+            }
+            Err(e) => eprintln!("kdock: could not open the settings window: {e}"),
+        }
+    }
+
+    /// The dock's own menu, opened from the separator or from bare panel.
+    ///
+    /// Anchored under the pointer rather than to a tile, since there is no tile
+    /// it belongs to.
+    fn open_dock_menu(&mut self, serial: u32, qh: &QueueHandle<Self>) {
+        let items = menu::build_dock_menu(self.config.magnification, self.config.auto_hide);
+        // Anchored to the pointer, since there is no tile it belongs to.
+        let x = self
+            .pointer_surface_x
+            .unwrap_or(self.dock.width as f32 / 2.0)
+            .round() as i32;
+        let anchor = (
+            x,
+            self.panel_top().round() as i32,
+            1,
+            self.panel_height_px(),
+        );
+        // `usize::MAX` marks "not a slot": the dock menu's actions never look
+        // one up, and a real index would let one of them act on a tile.
+        self.present_menu(items, anchor, usize::MAX, serial, qh);
+    }
+
+    fn panel_top(&self) -> f32 {
+        self.dock.height as f32
+            - self.metrics.pt(self.metrics.panel_bottom_gap)
+            - self.metrics.pt(self.metrics.panel_height())
+    }
+
+    fn panel_height_px(&self) -> i32 {
+        self.metrics.pt(self.metrics.panel_height()).round() as i32
+    }
+
+    /// Puts a built menu on screen, anchored to a rectangle in surface
+    /// coordinates.
+    fn present_menu(
+        &mut self,
+        items: Vec<menu::MenuItem>,
+        anchor: (i32, i32, i32, i32),
+        index: usize,
+        serial: u32,
+        qh: &QueueHandle<Self>,
+    ) {
         let Some(xdg_shell) = self.xdg_shell.as_ref() else {
             return;
         };
-        let slots = self.slots();
-        let Some(slot) = slots.get(index) else {
-            return;
-        };
-        if !slot.is_interactive() {
-            return;
-        }
-        // A tile part-way through shrinking away stands for something that is
-        // already gone; acting on it would target a window that no longer
-        // exists.
-        if self.departing.get(index).copied().unwrap_or(false) {
-            return;
-        }
-
-        // A grabbing popup is defined to hold keyboard focus, but the dock's
-        // layer surface says focus must never be given to it. Compositors are
-        // entitled to resolve that by refusing the grab, which would silently
-        // break click-outside-to-dismiss -- so focus is allowed for as long as
-        // the menu is open and taken away again the moment it closes.
-        self.set_keyboard_focusable(true);
-
-        let pinned = self.pinned.contains(&slot.key);
-        let items = menu::build_menu(
-            slot,
-            self.windows().toplevels(),
-            pinned,
-            self.windows().capabilities(),
-        );
         if items.is_empty() {
             return;
         }
@@ -1172,23 +1220,6 @@ impl App {
         let font_px = self.metrics.pt(self.metrics.menu_font_size);
         let text = &mut self.text;
         let layout = menu::layout_menu(&items, &self.metrics, |s| text.measure(s, font_px));
-
-        // Anchor to the icon as currently drawn, so the menu points at what was
-        // actually clicked rather than at the resting position.
-        let geometry = Layout::from_widths(&self.current_widths);
-        let Some(geom) = geometry.slots.get(index) else {
-            return;
-        };
-        let row_x = self.row_origin_x();
-        let panel_top = self.dock.height as f32
-            - self.metrics.pt(self.metrics.panel_bottom_gap)
-            - self.metrics.pt(self.metrics.panel_height());
-        let anchor = (
-            (row_x + geom.x).round() as i32,
-            panel_top.round() as i32,
-            geom.width.round() as i32,
-            self.metrics.pt(self.metrics.panel_height()).round() as i32,
-        );
 
         match MenuPopup::open(
             self.dock.layer(),
@@ -1208,6 +1239,48 @@ impl App {
             }
             Err(e) => eprintln!("kdock: could not open the menu: {e}"),
         }
+    }
+
+    fn open_menu(&mut self, index: usize, serial: u32, qh: &QueueHandle<Self>) {
+        let slots = self.slots();
+        let Some(slot) = slots.get(index).cloned() else {
+            return;
+        };
+        // A tile part-way through shrinking away stands for something that is
+        // already gone; acting on it would target a window that no longer
+        // exists.
+        if self.departing.get(index).copied().unwrap_or(false) {
+            return;
+        }
+
+        // The separator carries the dock's own menu, the way macOS's does. It
+        // is the only tile that stands for the dock rather than for something
+        // in it.
+        let items = if slot.kind == SlotKind::Separator {
+            menu::build_dock_menu(self.config.magnification, self.config.auto_hide)
+        } else {
+            menu::build_menu(
+                &slot,
+                self.windows().toplevels(),
+                self.pinned.contains(&slot.key),
+                self.windows().capabilities(),
+            )
+        };
+
+        // Anchor to the icon as currently drawn, so the menu points at what was
+        // actually clicked rather than at the resting position.
+        let geometry = Layout::from_widths(&self.current_widths);
+        let Some(geom) = geometry.slots.get(index).copied() else {
+            return;
+        };
+        let row_x = self.row_origin_x();
+        let anchor = (
+            (row_x + geom.x).round() as i32,
+            self.panel_top().round() as i32,
+            geom.width.round() as i32,
+            self.panel_height_px(),
+        );
+        self.present_menu(items, anchor, index, serial, qh);
     }
 
     /// Writes the pin list back to the config file.
@@ -1297,6 +1370,25 @@ impl App {
 
     /// Carries out a chosen menu item.
     fn apply_menu_action(&mut self, action: MenuAction, slot_index: usize, qh: &QueueHandle<Self>) {
+        // The dock's own actions stand for the dock, not for a tile, and the
+        // dock menu is opened with no slot at all. Handling them before the
+        // lookup is what keeps them working -- looking up first would fall out
+        // of the function and leave Quit doing nothing.
+        match action {
+            MenuAction::ToggleMagnification => {
+                return self.write_setting("magnification", (!self.config.magnification).into())
+            }
+            MenuAction::ToggleAutoHide => {
+                return self.write_setting("auto_hide", (!self.config.auto_hide).into())
+            }
+            MenuAction::OpenSettings => return self.open_settings(),
+            MenuAction::QuitDock => {
+                self.exit = true;
+                return;
+            }
+            _ => {}
+        }
+
         let slots = self.slots();
         let Some(slot) = slots.get(slot_index).cloned() else {
             return;
@@ -1321,6 +1413,12 @@ impl App {
             }
             MenuAction::Open => self.launch(&slot, None, qh),
             MenuAction::OpenTrash => open_trash(),
+
+            // Handled above, before the slot lookup.
+            MenuAction::ToggleMagnification
+            | MenuAction::ToggleAutoHide
+            | MenuAction::OpenSettings
+            | MenuAction::QuitDock => {}
             MenuAction::TogglePinned => {
                 if let Some(pos) = self.pinned.iter().position(|p| *p == slot.key) {
                     self.pinned.remove(pos);
@@ -2131,12 +2229,26 @@ impl PointerHandler for App {
             match event.kind {
                 PointerEventKind::Enter { .. } | PointerEventKind::Motion { .. } => {
                     let slots = self.slots();
+                    if self.pointer_surface_x.is_none() {
+                        // Armed on entry, not when the menu opens: `on_demand`
+                        // grants focus on a *click*, and by the time a click is
+                        // being handled it is too late to have influenced it.
+                        // A popup grab without focus is one the compositor may
+                        // refuse, which is what leaves a menu that will not go
+                        // away when clicked outside.
+                        self.set_keyboard_focusable(true);
+                    }
                     self.pointer_surface_x = Some(event.position.0 as f32);
                     self.left_at = None;
                     self.update_drag(event.position.0 as f32, event.position.1 as f32, &slots);
                     changed = true;
                 }
                 PointerEventKind::Leave { .. } => {
+                    // Give focus back the moment the pointer leaves, unless a
+                    // menu still needs it.
+                    if self.open_menu.is_none() {
+                        self.set_keyboard_focusable(false);
+                    }
                     self.pointer_surface_x = None;
                     self.left_at = Some(Instant::now());
                     changed = true;
@@ -2171,7 +2283,12 @@ impl PointerHandler for App {
                     serial,
                     ..
                 } => {
-                    right_clicked = self.slot_at(event.position.0 as f32).map(|i| (i, serial));
+                    // Anywhere on the panel that is not a tile still belongs
+                    // to the dock, so it opens the dock's own menu. Without
+                    // this the only way in is the separator, which disappears
+                    // when there is nothing on both sides of it -- taking the
+                    // one route to Quit with it.
+                    right_clicked = Some((self.slot_at(event.position.0 as f32), serial));
                 }
                 _ => {}
             }
@@ -2186,7 +2303,10 @@ impl PointerHandler for App {
         }
 
         if let Some((index, serial)) = right_clicked {
-            self.open_menu(index, serial, qh);
+            match index {
+                Some(i) => self.open_menu(i, serial, qh),
+                None => self.open_dock_menu(serial, qh),
+            }
         }
         if changed {
             self.request_frame(qh);

@@ -28,6 +28,15 @@ pub enum MenuAction {
     /// Add to, or remove from, the pinned launchers.
     TogglePinned,
     OpenTrash,
+
+    // -- The dock's own menu, reached by right-clicking the separator --------
+    /// Flip magnification, writing the change to the configuration.
+    ToggleMagnification,
+    ToggleAutoHide,
+    /// Open the settings window.
+    OpenSettings,
+    /// Quit the dock itself, as opposed to an application.
+    QuitDock,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,6 +70,31 @@ impl MenuItem {
 }
 
 /// Builds the menu for one slot.
+/// The dock's own menu.
+///
+/// macOS puts this on the Dock's separator rather than giving the Dock a
+/// window or a tray icon, and the same reasoning applies here: the dock has no
+/// window of its own, so without this there is no way to quit it short of
+/// killing the process.
+pub fn build_dock_menu(magnification: bool, auto_hide: bool) -> Vec<MenuItem> {
+    vec![
+        MenuItem {
+            label: "Magnification".to_owned(),
+            action: Some(MenuAction::ToggleMagnification),
+            checked: magnification,
+        },
+        MenuItem {
+            label: "Hide until pointed at".to_owned(),
+            action: Some(MenuAction::ToggleAutoHide),
+            checked: auto_hide,
+        },
+        MenuItem::separator(),
+        MenuItem::action("Dock Settings…", MenuAction::OpenSettings),
+        MenuItem::separator(),
+        MenuItem::action("Quit kdock", MenuAction::QuitDock),
+    ]
+}
+
 pub fn build_menu(
     slot: &Slot,
     toplevels: &[Toplevel],
@@ -268,6 +302,46 @@ mod tests {
     }
 
     /// Ids with no matching toplevel are stale; listing them would offer to
+    /// The dock has no window and no tray icon, so this menu is the only way
+    /// out short of killing the process.
+    #[test]
+    fn the_dock_menu_offers_a_way_to_quit() {
+        let items = build_dock_menu(true, false);
+        assert!(
+            items.iter().any(|i| i.action == Some(MenuAction::QuitDock)),
+            "no way to quit: {:?}",
+            labels(&items)
+        );
+    }
+
+    /// The toggles have to show what they currently are, or choosing one is a
+    /// guess.
+    #[test]
+    fn the_dock_menu_reflects_the_current_settings() {
+        let on = build_dock_menu(true, true);
+        let off = build_dock_menu(false, false);
+
+        let checked = |items: &[MenuItem], action: MenuAction| {
+            items
+                .iter()
+                .find(|i| i.action == Some(action.clone()))
+                .map(|i| i.checked)
+        };
+
+        assert_eq!(checked(&on, MenuAction::ToggleMagnification), Some(true));
+        assert_eq!(checked(&off, MenuAction::ToggleMagnification), Some(false));
+        assert_eq!(checked(&on, MenuAction::ToggleAutoHide), Some(true));
+        assert_eq!(checked(&off, MenuAction::ToggleAutoHide), Some(false));
+    }
+
+    #[test]
+    fn the_dock_menu_reaches_the_settings_window() {
+        let items = build_dock_menu(true, true);
+        assert!(items
+            .iter()
+            .any(|i| i.action == Some(MenuAction::OpenSettings)));
+    }
+
     /// A backend that cannot minimise or close must not offer entries that
     /// would silently do nothing -- the whole point of the capability flags.
     #[test]
