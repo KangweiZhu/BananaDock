@@ -1318,6 +1318,17 @@ impl App {
         }
     }
 
+    /// Wires everything that hangs off a seat, whichever way the seat arrived.
+    fn adopt_seat(&mut self, qh: &QueueHandle<Self>, seat: wl_seat::WlSeat) {
+        // `activate` is defined per-seat, so the window source needs one before
+        // a click can raise anything.
+        self.toplevels.set_seat(seat.clone());
+        if let Some(state) = self.data_device_state.as_ref() {
+            self.data_device = Some(state.get_data_device(qh, &seat));
+        }
+        self.seat = Some(seat);
+    }
+
     fn close_menu(&mut self) {
         self.open_menu = None;
         self.menu_items.clear();
@@ -2509,13 +2520,7 @@ impl SeatHandler for App {
     }
 
     fn new_seat(&mut self, _: &Connection, qh: &QueueHandle<Self>, seat: wl_seat::WlSeat) {
-        // `activate` is defined per-seat, so the window source needs one before
-        // a click can raise anything.
-        self.toplevels.set_seat(seat.clone());
-        if let Some(state) = self.data_device_state.as_ref() {
-            self.data_device = Some(state.get_data_device(qh, &seat));
-        }
-        self.seat = Some(seat);
+        self.adopt_seat(qh, seat);
     }
 
     fn new_capability(
@@ -2525,6 +2530,15 @@ impl SeatHandler for App {
         seat: wl_seat::WlSeat,
         capability: Capability,
     ) {
+        // `new_seat` only fires for seats that appear *after* startup; a seat
+        // that already existed when the registry was enumerated announces
+        // itself here, through its capabilities, and nowhere else. Missing it
+        // left `self.seat` unset, and everything justified by a seat --
+        // the menu's popup grab, activation, drag-and-drop -- silently never
+        // happened.
+        if self.seat.is_none() {
+            self.adopt_seat(qh, seat.clone());
+        }
         if capability == Capability::Pointer && self.pointer.is_none() {
             match self.seat_state.get_pointer(qh, &seat) {
                 Ok(p) => self.pointer = Some(p),
