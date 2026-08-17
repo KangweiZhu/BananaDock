@@ -43,6 +43,9 @@ pub struct Slot {
     /// Any of this application's windows is focused.
     pub active: bool,
     pub pinned: bool,
+    /// For a minimised window's tile: the handle its contents can be captured
+    /// with, so the tile can show the window rather than its app icon.
+    pub capture_key: Option<String>,
 }
 
 impl Slot {
@@ -89,6 +92,7 @@ pub fn build_slots_with(
                 windows: Vec::new(),
                 active: false,
                 pinned: true,
+                capture_key: None,
             },
             // A pinned entry whose .desktop has since been uninstalled still
             // holds its place rather than silently vanishing.
@@ -100,6 +104,7 @@ pub fn build_slots_with(
                 windows: Vec::new(),
                 active: false,
                 pinned: true,
+                capture_key: None,
             },
         })
         .collect();
@@ -127,6 +132,7 @@ pub fn build_slots_with(
                 windows: vec![t.id],
                 active: t.active,
                 pinned: false,
+                capture_key: None,
             }),
         }
     }
@@ -154,6 +160,7 @@ pub fn build_slots_with(
                 windows: vec![t.id],
                 active: false,
                 pinned: false,
+                capture_key: t.capture_key.clone(),
             });
         }
     }
@@ -174,6 +181,7 @@ pub fn build_slots_with(
             windows: Vec::new(),
             active: false,
             pinned: true,
+            capture_key: None,
         });
     }
 
@@ -187,6 +195,7 @@ pub fn build_slots_with(
             windows: Vec::new(),
             active: false,
             pinned: true,
+            capture_key: None,
         });
     }
     slots.extend(tail);

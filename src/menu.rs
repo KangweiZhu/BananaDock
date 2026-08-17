@@ -189,6 +189,7 @@ mod tests {
 
     fn slot(kind: SlotKind, windows: Vec<ToplevelId>) -> Slot {
         Slot {
+            capture_key: None,
             kind,
             key: "app".into(),
             label: "App".into(),

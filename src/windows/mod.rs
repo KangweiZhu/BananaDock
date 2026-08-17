@@ -32,6 +32,10 @@ pub struct Toplevel {
     pub minimized: bool,
     /// Set for dialogs and other windows owned by another toplevel.
     pub parent: Option<ToplevelId>,
+    /// Opaque handle the backend can use to capture this window's contents,
+    /// where it is able to. `None` means no thumbnail is obtainable and the
+    /// application's icon stands in.
+    pub capture_key: Option<String>,
 }
 
 /// What a given window source is actually able to do.

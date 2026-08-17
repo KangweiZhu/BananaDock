@@ -115,6 +115,9 @@ impl KwinWindows {
                 // KWin's script API exposes transientFor, but the dock groups by
                 // application anyway, so nothing needs it yet.
                 parent: None,
+                // The script route reports the same window uuid the screenshot
+                // interface takes.
+                capture_key: Some(r.uuid.clone()),
             })
             .collect();
 

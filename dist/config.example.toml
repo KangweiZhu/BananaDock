@@ -29,6 +29,10 @@ show_trash = true
 # as macOS does. Set to false for macOS's "Minimize windows into application
 # icon" behaviour, where a minimised window only shows through its app's icon.
 separate_minimized = true
+#
+# On KWin the tile shows the window itself, provided the desktop entry carries
+# X-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2. Without that it
+# falls back to the application's icon.
 
 # Icon theme name. Unset follows the desktop's own setting, read from KDE's or
 # GTK's configuration.

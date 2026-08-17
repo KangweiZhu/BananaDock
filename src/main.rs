@@ -11,6 +11,7 @@ mod model;
 mod render;
 mod shell;
 mod text;
+mod thumbnails;
 mod trash;
 mod windows;
 
@@ -217,6 +218,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         kwin,
         launchers: LauncherIndex::load(),
         icons: IconCache::new(config.icon_theme.clone()),
+        // Capturing goes through KWin's screenshot interface, which rides the
+        // same session bus the window fallback uses.
+        thumbnails: thumbnails::ThumbnailCache::new(zbus::blocking::Connection::session().ok()),
+        events: tx.clone(),
         pinned: config.pinned.clone(),
         config,
         config_path,
@@ -272,6 +277,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Watched::Config => app.reload_config(),
                     Watched::Trash => app.reload_trash(),
                     Watched::Windows(snapshot) => app.apply_kwin_windows(&snapshot),
+                    Watched::Thumbnail(uuid, thumb) => app.apply_thumbnail(uuid, thumb),
                 }
             }
         })
@@ -363,6 +369,8 @@ enum Watched {
     Trash,
     /// A window-list snapshot pushed in by the KWin script.
     Windows(String),
+    /// A window thumbnail finished capturing, or failed to.
+    Thumbnail(String, Option<thumbnails::Thumbnail>),
 }
 
 /// Watches one file for changes.
@@ -488,10 +496,13 @@ fn dump_frame(path: &str, width: u32, ids: &[String]) -> Result<(), Box<dyn std:
         },
         &metrics,
         &palette,
-        &slots,
-        &geometry,
-        &mut icons,
-        None,
+        render::Scene {
+            slots: &slots,
+            layout: &geometry,
+            icons: &mut icons,
+            thumbnails: &thumbnails::ThumbnailCache::default(),
+            drop_target: None,
+        },
     );
 
     pixmap.save_png(path)?;
@@ -515,6 +526,7 @@ fn dump_menu(path: &str) -> Result<(), Box<dyn std::error::Error>> {
     let mut text = text::TextRenderer::new();
 
     let slot = Slot {
+        capture_key: None,
         kind: SlotKind::App,
         key: "demo".into(),
         label: "Firefox".into(),
@@ -586,6 +598,9 @@ struct App {
     kwin: Option<KwinWindows>,
     launchers: LauncherIndex,
     icons: IconCache,
+    thumbnails: thumbnails::ThumbnailCache,
+    /// Captures finish on their own threads and report back through here.
+    events: channel::Sender<Watched>,
     /// Desktop entry ids the user pinned, in order.
     pinned: Vec<String>,
     config: Config,
@@ -671,6 +686,38 @@ impl App {
                 "   [{}] app_id={:?} active={} min={} title={:?}",
                 t.id, t.app_id, t.active, t.minimized, t.title
             );
+        }
+    }
+
+    fn apply_thumbnail(&mut self, uuid: String, thumb: Option<thumbnails::Thumbnail>) {
+        match thumb {
+            Some(t) => self.thumbnails.insert(uuid, t),
+            None => self.thumbnails.mark_failed(uuid),
+        }
+        self.draw();
+    }
+
+    /// Asks for the pictures the minimised tiles need, and drops the ones no
+    /// tile wants any more.
+    ///
+    /// Forgetting on restore matters: the next time the window is minimised it
+    /// should show what it looks like *then*, not a picture from last time.
+    fn sync_thumbnails(&mut self, slots: &[Slot]) {
+        let wanted: Vec<String> = slots
+            .iter()
+            .filter(|s| s.kind == SlotKind::MinimizedWindow)
+            .filter_map(|s| s.capture_key.clone())
+            .collect();
+
+        for key in &wanted {
+            let tx = self.events.clone();
+            self.thumbnails.request(key, move |uuid, thumb| {
+                let _ = tx.send(Watched::Thumbnail(uuid, thumb));
+            });
+        }
+
+        for stale in self.thumbnails.keys_not_in(&wanted) {
+            self.thumbnails.forget(&stale);
         }
     }
 
@@ -826,6 +873,7 @@ impl App {
         };
 
         let slots = self.slots();
+        self.sync_thumbnails(&slots);
         if self.current_widths.len() != slots.len() {
             self.step_widths(0.0);
         }
@@ -847,10 +895,13 @@ impl App {
             },
             &self.metrics,
             &self.palette,
-            &slots,
-            &geometry,
-            &mut self.icons,
-            self.drop_target,
+            render::Scene {
+                slots: &slots,
+                layout: &geometry,
+                icons: &mut self.icons,
+                thumbnails: &self.thumbnails,
+                drop_target: self.drop_target,
+            },
         );
 
         // Windows only need to avoid the panel at rest, not the magnification

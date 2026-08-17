@@ -16,6 +16,10 @@ Categories=Utility;
 # COMMAS and a trailing semicolon breaks the whole value -- neither of which
 # matches the desktop-entry spec, and both fail silently.
 X-KDE-Wayland-Interfaces=org_kde_plasma_window_management
+# Window thumbnails for the minimised tiles go through KWin's screenshot
+# interface, which is gated the same way. Without this the tiles fall back to
+# the application's icon.
+X-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2
 # The dock has no window of its own, so it must not appear in a task switcher
 # or in its own icon row. Set this to false if you want to launch it by name
 # from KRunner or the application menu.

@@ -17,6 +17,7 @@ use crate::{
     metrics::{Metrics, Palette},
     model::{Slot, SlotKind},
     text::TextRenderer,
+    thumbnails::ThumbnailCache,
 };
 
 /// What is being drawn into, and at what resolution.
@@ -30,6 +31,16 @@ pub struct Target<'a> {
     /// How far down the panel is pushed for the auto-hide slide, in logical
     /// pixels. Zero when fully revealed.
     pub offset_y: f32,
+}
+
+/// What to draw: the row itself and everything needed to paint it.
+pub struct Scene<'a> {
+    pub slots: &'a [Slot],
+    pub layout: &'a Layout,
+    pub icons: &'a mut IconCache,
+    pub thumbnails: &'a ThumbnailCache,
+    /// Tile a drag is currently hovering, if any.
+    pub drop_target: Option<usize>,
 }
 
 /// Where the panel sits inside the surface.
@@ -151,10 +162,7 @@ pub fn draw_dock(
     target: Target<'_>,
     metrics: &Metrics,
     palette: &Palette,
-    slots: &[Slot],
-    layout: &Layout,
-    icons: &mut IconCache,
-    drop_target: Option<usize>,
+    scene: Scene<'_>,
 ) -> Rect {
     let Target {
         pixmap,
@@ -162,6 +170,13 @@ pub fn draw_dock(
         scale,
         offset_y,
     } = target;
+    let Scene {
+        slots,
+        layout,
+        icons,
+        thumbnails,
+        drop_target,
+    } = scene;
     let t = Transform::from_scale(scale, scale);
 
     // An empty row still gets a panel, so the dock does not blink out of
@@ -224,7 +239,34 @@ pub fn draw_dock(
         // The launch bounce lifts the artwork only -- the dot stays on the
         // panel, as it does on macOS.
         let icon_bottom = panel.bottom() - metrics.pt(metrics.icon_bottom_margin()) - geom.lift;
-        if let Some(name) = slot.icon_name.as_deref() {
+
+        // A minimised window shows the window, not its application's icon --
+        // that is the whole point of giving it a tile of its own. The picture
+        // arrives asynchronously, so the icon stands in until it does.
+        let thumbnail = slot
+            .capture_key
+            .as_deref()
+            .filter(|_| slot.kind == SlotKind::MinimizedWindow)
+            .and_then(|key| thumbnails.get(key));
+
+        if let Some(thumb) = thumbnail {
+            // Fitted inside the icon's box, keeping the window's proportions:
+            // stretching a window to a square makes it unrecognisable.
+            let (w, h) = if thumb.aspect >= 1.0 {
+                (icon_px, icon_px / thumb.aspect)
+            } else {
+                (icon_px * thumb.aspect, icon_px)
+            };
+            draw_image(
+                pixmap,
+                t,
+                &thumb.pixmap,
+                centre_x - w / 2.0,
+                icon_bottom - (icon_px + h) / 2.0,
+                w,
+                h,
+            );
+        } else if let Some(name) = slot.icon_name.as_deref() {
             if let Some(art) = icons.get(name) {
                 draw_icon(
                     pixmap,
@@ -392,6 +434,31 @@ fn draw_icon(pixmap: &mut Pixmap, t: Transform, art: &Pixmap, x: f32, y: f32, si
     pixmap.fill_rect(dest, &paint, t, None);
 }
 
+/// Blits an image into an arbitrary rectangle.
+///
+/// Unlike [`draw_icon`] the source need not be square, so the two axes scale
+/// independently -- the caller has already worked out a width and height that
+/// preserve the source's proportions.
+fn draw_image(pixmap: &mut Pixmap, t: Transform, art: &Pixmap, x: f32, y: f32, w: f32, h: f32) {
+    let Some(dest) = Rect::from_xywh(x, y, w, h) else {
+        return;
+    };
+    let (sx, sy) = (w / art.width() as f32, h / art.height() as f32);
+
+    let paint = Paint {
+        shader: Pattern::new(
+            art.as_ref(),
+            SpreadMode::Pad,
+            FilterQuality::Bilinear,
+            1.0,
+            Transform::from_scale(sx, sy).post_translate(x, y),
+        ),
+        anti_alias: true,
+        ..Default::default()
+    };
+    pixmap.fill_rect(dest, &paint, t, None);
+}
+
 /// The hairline that fences the Trash off from the applications.
 fn draw_separator(
     pixmap: &mut Pixmap,
@@ -526,6 +593,7 @@ mod tests {
 
     fn slot(running: bool) -> Slot {
         Slot {
+            capture_key: None,
             kind: SlotKind::App,
             key: "test".into(),
             label: "test".into(),
@@ -567,10 +635,13 @@ mod tests {
             },
             &m,
             &Palette::default(),
-            &slots,
-            &geom,
-            &mut icons,
-            None,
+            Scene {
+                slots: &slots,
+                layout: &geom,
+                icons: &mut icons,
+                thumbnails: &ThumbnailCache::default(),
+                drop_target: None,
+            },
         );
         (pixmap, panel, m)
     }

@@ -52,6 +52,19 @@ With the grant in place the dock uses the protocol directly: event-driven
 updates, activate, minimise, close, and `set_minimized_geometry`, which points
 KWin's minimise animation at the right slot in the dock.
 
+A second entry earns the thumbnails on the minimised tiles:
+
+```ini
+X-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2
+```
+
+`org.kde.KWin.ScreenShot2.CaptureWindow` writes a window's raw pixels into a
+file descriptor the caller passes in, so a thumbnail costs one D-Bus call and a
+read — no PipeWire, no stream to negotiate, no GPU buffer to import. KWin keeps
+a minimised window's last frame, so the capture can happen lazily, when a tile
+first needs a picture. Without the grant the tiles show their application's icon
+instead.
+
 ### The fallback, if the grant is missing
 
 Without it the dock loads a small script (`assets/kwin-windows.js`, compiled

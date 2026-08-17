@@ -154,6 +154,9 @@ impl PlasmaWindows {
                 .parent_uuid
                 .as_deref()
                 .and_then(|uuid| self.id_of_uuid(uuid)),
+            // KWin's own window id, which is what its screenshot interface
+            // takes.
+            capture_key: Some(inner.uuid.clone()),
         })
     }
 
