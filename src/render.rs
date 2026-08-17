@@ -113,15 +113,22 @@ pub fn capsule_region(rect: Rect, radius: f32, slices: u32) -> Vec<(i32, i32, i3
 
     let mut out = Vec::with_capacity(slices as usize * 2 + 1);
 
+    // Every horizontal edge is rounded once and shared verbatim by the
+    // rectangles on either side of it. Rounding a rectangle's position and its
+    // height separately instead leaves one-pixel gaps between slices whenever
+    // the slice pitch is fractional, and every such gap is a row the
+    // compositor leaves unblurred -- a hairline across the panel.
+    let band_top = (rect.y() + r).round() as i32;
+    let band_bottom = (rect.bottom() - r).round() as i32;
+
     // Middle band: full width, between the two caps. Absent when the caps meet
     // in the middle, which is exactly the case for the panel's own capsule.
-    let band_h = (rect.height() - 2.0 * r).round() as i32;
-    if band_h > 0 {
+    if band_bottom > band_top {
         out.push((
             rect.x().round() as i32,
-            (rect.y() + r).round() as i32,
+            band_top,
             rect.width().round() as i32,
-            band_h,
+            band_bottom - band_top,
         ));
     }
 
@@ -132,16 +139,26 @@ pub fn capsule_region(rect: Rect, radius: f32, slices: u32) -> Vec<(i32, i32, i3
         let dy = r - y0;
         let inset = r - (r * r - dy * dy).max(0.0).sqrt();
 
-        let x = (rect.x() + inset).round() as i32;
-        let w = (rect.width() - 2.0 * inset).round() as i32;
-        let h = ((y1 - y0).round() as i32).max(1);
-        if w <= 0 {
+        let x0 = (rect.x() + inset).round() as i32;
+        let x1 = (rect.right() - inset).round() as i32;
+        if x1 <= x0 {
             continue;
         }
 
-        // Top cap slice, and its mirror in the bottom cap.
-        out.push((x, (rect.y() + y0).round() as i32, w, h));
-        out.push((x, (rect.bottom() - y1).round() as i32, w, h));
+        // Top cap slice, and its mirror in the bottom cap. A slice thinner
+        // than a pixel collapses to nothing here; its row belongs to a
+        // neighbour that shares the edge, so nothing is left uncovered.
+        let t0 = (rect.y() + y0).round() as i32;
+        let t1 = (rect.y() + y1).round() as i32;
+        if t1 > t0 {
+            out.push((x0, t0, x1 - x0, t1 - t0));
+        }
+
+        let b0 = (rect.bottom() - y1).round() as i32;
+        let b1 = (rect.bottom() - y0).round() as i32;
+        if b1 > b0 {
+            out.push((x0, b0, x1 - x0, b1 - b0));
+        }
     }
 
     out
@@ -758,6 +775,26 @@ mod tests {
         let rect = Rect::from_xywh(0.0, 0.0, 300.0, 80.0).unwrap();
         for (_, _, w, h) in capsule_region(rect, 40.0, 10) {
             assert!(w > 0 && h > 0, "degenerate rect {w}x{h}");
+        }
+    }
+
+    /// Every row of the capsule must be covered by some slice. A missed row is
+    /// composited unblurred and reads as a dark hairline across the panel.
+    /// Fractional geometry is what exposed this -- these numbers reproduce a
+    /// real configuration (tile 47pt, icon 37pt, radius ratio 0.26) whose
+    /// slice pitch of ~1.19px used to leave a gap every fifth slice.
+    #[test]
+    fn capsule_region_leaves_no_horizontal_gaps() {
+        let rect = Rect::from_xywh(20.0, 38.82, 300.0, 73.18).unwrap();
+        let rects = capsule_region(rect, 19.03, 16);
+
+        let top = rects.iter().map(|r| r.1).min().unwrap();
+        let bottom = rects.iter().map(|r| r.1 + r.3).max().unwrap();
+        for row in top..bottom {
+            assert!(
+                rects.iter().any(|&(_, y, _, h)| y <= row && row < y + h),
+                "row {row} is not covered by any slice"
+            );
         }
     }
 
