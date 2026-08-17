@@ -124,6 +124,14 @@ impl Settings {
         self.controls = ui::controls(&self.config);
     }
 
+    /// Writes a slider's current value to the file, once the drag has ended.
+    fn save_slider(&mut self, index: usize) {
+        let Some(Control::Slider { key, value, .. }) = self.controls.get(index).cloned() else {
+            return;
+        };
+        self.commit_change(key, (value as f64).into());
+    }
+
     fn apply(&mut self, hit: Hit) {
         match hit {
             Hit::Toggle(i) => {
@@ -133,19 +141,17 @@ impl Settings {
                 self.commit_change(key, (!value).into());
             }
             Hit::Slider(i, raw) => {
-                let Some(Control::Slider {
-                    key, unit, value, ..
-                }) = self.controls.get(i).cloned()
-                else {
+                let Some(Control::Slider { unit, .. }) = self.controls.get(i).cloned() else {
                     return;
                 };
+                // Only the in-memory value moves while the pointer is down. The
+                // file is written once, on release: writing on every motion
+                // event means dozens of saves a second, and the dock re-reads
+                // the file after each one.
                 let next = ui::quantise(raw, unit);
-                // Every pointer motion would otherwise rewrite the file, and
-                // the dock re-reads it each time.
-                if (next - value).abs() < f32::EPSILON {
-                    return;
+                if let Some(Control::Slider { value, .. }) = self.controls.get_mut(i) {
+                    *value = next;
                 }
-                self.commit_change(key, (next as f64).into());
             }
         }
     }
@@ -168,25 +174,41 @@ impl Settings {
         );
 
         let stride = w as i32 * 4;
-        if self.buffer.is_none() {
-            self.buffer = self
+
+        // `canvas` yields None while the compositor still holds the buffer, so
+        // a second one gets allocated -- ordinary double buffering. Skipping
+        // the frame instead leaves the window frozen for as long as the
+        // compositor keeps hold, which during a drag is most of the time.
+        let reusable = match &self.buffer {
+            Some(buffer) => self.pool.canvas(buffer).is_some(),
+            None => false,
+        };
+        let (buffer, canvas) = if reusable {
+            let buffer = self.buffer.take().expect("checked just above");
+            let canvas = self.pool.canvas(&buffer).expect("checked just above");
+            (buffer, canvas)
+        } else {
+            match self
                 .pool
                 .create_buffer(w as i32, h as i32, stride, wl_shm::Format::Argb8888)
-                .ok()
-                .map(|(b, _)| b);
-        }
-        let Some(buffer) = self.buffer.as_ref() else {
-            return;
-        };
-        let Some(canvas) = self.pool.canvas(buffer) else {
-            // The compositor still holds it; the next frame will land.
-            return;
+            {
+                Ok(pair) => pair,
+                Err(e) => {
+                    eprintln!("kdock: could not allocate a buffer: {e}");
+                    return;
+                }
+            }
         };
         crate::shell::layer::copy_to_argb8888(pixmap.data(), canvas);
+        self.buffer = Some(buffer);
 
         let surface = self.window.wl_surface();
         surface.damage_buffer(0, 0, w as i32, h as i32);
-        let _ = buffer.attach_to(surface);
+        let _ = self
+            .buffer
+            .as_ref()
+            .expect("just assigned")
+            .attach_to(surface);
         self.window.commit();
         let _ = qh;
     }
@@ -269,7 +291,10 @@ impl PointerHandler for Settings {
                     }
                 }
                 PointerEventKind::Release { button: 0x110, .. } => {
-                    self.dragging = None;
+                    if let Some(i) = self.dragging.take() {
+                        self.save_slider(i);
+                        dirty = true;
+                    }
                 }
                 _ => {}
             }
