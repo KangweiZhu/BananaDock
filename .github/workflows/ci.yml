@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # wayland and xkbcommon are needed to build the client bindings;
+      # fontconfig is what the text stack discovers system fonts through, and
+      # the font tests shape real strings, so a font package has to be present.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwayland-dev libxkbcommon-dev libfontconfig-1-dev fonts-dejavu-core
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test --all-targets
+
+  # Behaviour against a real compositor cannot be checked here: CI has no
+  # Wayland session, and the protocols the dock depends on differ between
+  # compositors in ways only a running one reveals. Those checks are manual,
+  # against niri and KWin.

@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=kdock
+GenericName=Dock
+Comment=A macOS-style dock for Wayland
+Exec=kdock
+Icon=user-desktop
+Terminal=false
+Categories=Utility;
+# The dock has no window of its own, so it must not appear in a task switcher
+# or in its own icon row.
+NoDisplay=true
+X-GNOME-Autostart-enabled=false
+OnlyShowIn=KDE;Hyprland;niri;sway;Wayfire;river;COSMIC;

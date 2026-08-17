@@ -1,0 +1,20 @@
+[Unit]
+Description=macOS-style dock for Wayland
+Documentation=https://github.com/kdock/kdock
+PartOf=graphical-session.target
+After=graphical-session.target
+# The dock is a Wayland client and cannot start before there is a compositor to
+# connect to.
+Requisite=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/kdock
+Restart=on-failure
+# A compositor that has not finished starting refuses connections; back off
+# rather than spinning through restarts.
+RestartSec=2
+Slice=session.slice
+
+[Install]
+WantedBy=graphical-session.target

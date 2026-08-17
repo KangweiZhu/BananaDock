@@ -1,0 +1,40 @@
+# kdock configuration.
+#
+# Copy to ~/.config/kdock/config.toml. Every value below is the default, so an
+# empty file behaves exactly like this one and you only need to write the lines
+# you want to change.
+#
+# The file is re-read the moment it changes -- there is no need to restart.
+
+# Tile pitch in points: the centre-to-centre spacing of icons, which is what
+# macOS's Dock size slider adjusts. The artwork is a fixed fraction of it.
+tile_size = 64.0
+
+# Pitch at full magnification, directly under the pointer.
+large_size = 128.0
+
+magnification = true
+
+# How far the pointer's influence reaches, in tiles.
+magnification_range = 2.5
+
+# Slide the dock off-screen when the pointer is elsewhere. A thin strip along
+# the screen edge brings it back. While auto-hiding, the dock reserves no space,
+# so windows get the whole screen.
+auto_hide = false
+
+show_trash = true
+
+# Icon theme name. Unset follows the desktop's own setting, read from KDE's or
+# GTK's configuration.
+# icon_theme = "breeze"
+
+# Which screen to sit on, by connector name as your compositor reports it
+# (`DP-1`, `eDP-1`, `HDMI-A-1`). Unset lets the compositor choose, which is
+# normally the focused screen. Changing this needs a restart.
+# output = "DP-1"
+
+# Applications kept in the dock, by desktop entry id, in the order they appear.
+# The dock rewrites this array when you drag icons around or use "Keep in Dock";
+# the rest of this file, comments included, is left untouched.
+pinned = []

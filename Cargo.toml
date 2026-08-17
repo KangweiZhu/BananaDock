@@ -1,0 +1,31 @@
+[package]
+name = "kdock"
+version = "0.1.0"
+edition = "2021"
+description = "A macOS-style dock for Wayland compositors that support wlr-layer-shell"
+license = "GPL-3.0-or-later"
+
+[dependencies]
+calloop = { version = "0.14", features = ["signals"] }
+cosmic-text = "0.19.0"
+freedesktop-desktop-entry = "0.8.1"
+freedesktop-icons = "0.4.0"
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+notify = "8.2.0"
+resvg = "0.48.1"
+serde = { version = "1.0.229", features = ["derive"] }
+smithay-client-toolkit = "0.21.1"
+tiny-skia = "0.12.0"
+toml = "1.1.4"
+toml_edit = "0.25.13"
+# Not used directly. Without its `log` feature, wayland-backend aliases its
+# internal `log_error!` straight to `eprintln!`, so an ordinary compositor
+# shutdown prints "Io error: Broken pipe" over the top of whatever the user is
+# doing. Enabling the feature routes it through the `log` crate instead, which
+# is silent until a logger is installed. Listed here because Cargo unifies
+# features across the tree and smithay-client-toolkit does not turn it on.
+wayland-backend = { version = "0.3.17", features = ["log"] }
+wayland-client = "0.31.15"
+wayland-protocols = { version = "0.32.13", features = ["staging", "client"] }
+wayland-protocols-wlr = "0.3.12"
+zbus = { version = "5.19.0", features = ["blocking-api"] }
