@@ -1,11 +1,14 @@
 //! User configuration, and reloading it when the file changes.
 //!
-//! Only preferences live here. The proportions reverse-engineered from the
-//! reference screenshot -- how big the artwork is relative to its tile, how the
-//! panel's height relates to the tile pitch, the capsule radius -- stay in
-//! [`crate::metrics`] as design constants. Exposing those as settings would let
-//! the dock be configured into something that is no longer the thing being
-//! replicated, and would scatter the values the calibration pass has to edit.
+//! Only preferences live here; [`crate::metrics`] keeps the proportions
+//! reverse-engineered from the reference screenshot, and its values are what
+//! every setting starts from.
+//!
+//! A few of those proportions are also exposed as settings -- the artwork's
+//! size, the panel's radius and padding -- because they are what people
+//! actually want to change and leaving them fixed only pushed them into
+//! editing constants and rebuilding. Anything left unset still follows the
+//! reference, so the defaults remain the thing being replicated.
 
 use std::path::{Path, PathBuf};
 
@@ -25,13 +28,28 @@ pub fn config_home() -> Option<PathBuf> {
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     /// Tile pitch in points -- the macOS Dock size slider.
+    ///
+    /// This is the centre-to-centre spacing of icons, not the size of the
+    /// artwork. The two differ on macOS, which is why `icon_size` exists.
     pub tile_size: f32,
+    /// Size of the icon artwork in points.
+    ///
+    /// Independent of the pitch: the gap between icons is `tile_size` minus
+    /// this. Unset follows the reference proportion (0.67 of the pitch).
+    pub icon_size: Option<f32>,
     /// Pitch at full magnification.
     pub large_size: f32,
     pub magnification: bool,
     /// Cursor influence radius, in tiles.
     pub magnification_range: f32,
     pub auto_hide: bool,
+
+    /// Panel corner radius as a fraction of its height. 0.5 is a capsule --
+    /// the end caps become semicircles -- and 0 is a plain rectangle.
+    pub panel_radius: f32,
+    /// Space between the end icons and the panel's edges, in points. This is
+    /// what makes the panel wider than the row it holds.
+    pub panel_padding: f32,
     pub show_trash: bool,
     /// Whether a minimised window gets its own tile to the right of the
     /// applications, as macOS does by default, or only shows through its
@@ -50,10 +68,13 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             tile_size: 64.0,
+            icon_size: None,
             large_size: 128.0,
             magnification: true,
             magnification_range: 2.5,
             auto_hide: false,
+            panel_radius: 0.5,
+            panel_padding: 8.0,
             show_trash: true,
             separate_minimized: true,
             icon_theme: None,
@@ -128,6 +149,17 @@ impl Config {
         metrics.large_size = self.large_size.max(metrics.tile_size);
         metrics.magnification_enabled = self.magnification;
         metrics.magnification_range = self.magnification_range.max(0.0);
+
+        // Held as a ratio rather than an absolute size because magnification
+        // scales the artwork with its slot: the icon is always the same
+        // fraction of whatever width the slot currently has.
+        if let Some(size) = self.icon_size {
+            metrics.icon_size_ratio = (size / metrics.tile_size).clamp(0.05, 1.0);
+        }
+        // Past half the height opposite corners would overlap, and the drawing
+        // clamps anyway -- rejecting it here keeps the config honest.
+        metrics.panel_radius_ratio = self.panel_radius.clamp(0.0, 0.5);
+        metrics.panel_padding_h = self.panel_padding.max(0.0);
     }
 }
 

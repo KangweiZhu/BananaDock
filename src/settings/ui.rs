@@ -23,6 +23,10 @@ pub const TOGGLE_WIDTH: f32 = 40.0;
 pub const TOGGLE_HEIGHT: f32 = 22.0;
 pub const WINDOW_WIDTH: f32 = 460.0;
 
+/// Artwork size as a fraction of the tile pitch, from the reference. Only used
+/// to give the icon-size slider a starting value when the setting is unset.
+const DEFAULT_ICON_RATIO: f32 = 0.67;
+
 /// One line in the window.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Control {
@@ -62,15 +66,29 @@ pub fn controls(config: &Config) -> Vec<Control> {
         Control::Heading("Size"),
         Control::Slider {
             key: "tile_size",
-            label: "Icon size",
+            // Not the icon's size: the centre-to-centre spacing of the tiles,
+            // which is what macOS's own Dock size slider adjusts.
+            label: "Tile spacing",
             value: config.tile_size,
             min: 32.0,
             max: 96.0,
             unit: "pt",
         },
         Control::Slider {
+            key: "icon_size",
+            label: "Icon size",
+            // Unset follows the reference proportion, so the slider still has
+            // somewhere to start from.
+            value: config
+                .icon_size
+                .unwrap_or(config.tile_size * DEFAULT_ICON_RATIO),
+            min: 16.0,
+            max: 96.0,
+            unit: "pt",
+        },
+        Control::Slider {
             key: "large_size",
-            label: "Magnified size",
+            label: "Magnified spacing",
             value: config.large_size,
             min: 48.0,
             max: 160.0,
@@ -88,6 +106,23 @@ pub fn controls(config: &Config) -> Vec<Control> {
             min: 1.0,
             max: 5.0,
             unit: "tiles",
+        },
+        Control::Heading("Panel"),
+        Control::Slider {
+            key: "panel_radius",
+            label: "Corner radius",
+            value: config.panel_radius,
+            min: 0.0,
+            max: 0.5,
+            unit: "of height",
+        },
+        Control::Slider {
+            key: "panel_padding",
+            label: "Edge padding",
+            value: config.panel_padding,
+            min: 0.0,
+            max: 32.0,
+            unit: "pt",
         },
         Control::Heading("Behaviour"),
         Control::Toggle {
@@ -180,10 +215,11 @@ pub fn hit(controls: &[Control], width: f32, x: f32, y: f32) -> Option<Hit> {
 /// Sub-pixel precision in a config file is noise: it makes the file ugly and
 /// the difference is invisible.
 pub fn quantise(value: f32, unit: &str) -> f32 {
-    if unit == "tiles" {
-        (value * 10.0).round() / 10.0
-    } else {
-        value.round()
+    match unit {
+        "tiles" => (value * 10.0).round() / 10.0,
+        // A radius runs 0..0.5, so whole numbers would leave two usable stops.
+        "of height" => (value * 100.0).round() / 100.0,
+        _ => value.round(),
     }
 }
 
@@ -249,16 +285,28 @@ mod tests {
         assert!(height > *tops.last().unwrap());
     }
 
+    /// Found by key rather than by position: the row order changes whenever a
+    /// setting is added, and a hard-coded index only fails later.
+    fn index_of(controls: &[Control], wanted: &str) -> usize {
+        controls
+            .iter()
+            .position(|c| match c {
+                Control::Heading(_) => false,
+                Control::Toggle { key, .. } | Control::Slider { key, .. } => *key == wanted,
+            })
+            .unwrap_or_else(|| panic!("no control for {wanted}"))
+    }
+
     #[test]
     fn a_click_on_a_toggle_row_flips_that_toggle() {
         let controls = sliders_and_toggles();
         let (tops, _) = rows(&controls);
-        // Index 3 is the magnification toggle.
-        let y = tops[3] + ROW_HEIGHT / 2.0;
+        let i = index_of(&controls, "magnification");
+        let y = tops[i] + ROW_HEIGHT / 2.0;
 
         assert_eq!(
             hit(&controls, WINDOW_WIDTH, WINDOW_WIDTH / 2.0, y),
-            Some(Hit::Toggle(3))
+            Some(Hit::Toggle(i))
         );
     }
 
@@ -268,9 +316,10 @@ mod tests {
     fn a_slider_maps_its_track_onto_its_range() {
         let controls = sliders_and_toggles();
         let (tops, _) = rows(&controls);
-        let top = tops[1];
+        let i = index_of(&controls, "tile_size");
+        let top = tops[i];
         let y = top + ROW_HEIGHT / 2.0;
-        let (tx, _, tw, _) = control_rect(&controls[1], top, WINDOW_WIDTH).unwrap();
+        let (tx, _, tw, _) = control_rect(&controls[i], top, WINDOW_WIDTH).unwrap();
 
         let Some(Hit::Slider(_, low)) = hit(&controls, WINDOW_WIDTH, tx, y) else {
             panic!("no slider hit at the left end")
@@ -289,7 +338,7 @@ mod tests {
     fn dragging_beyond_the_track_clamps() {
         let controls = sliders_and_toggles();
         let (tops, _) = rows(&controls);
-        let y = tops[1] + ROW_HEIGHT / 2.0;
+        let y = tops[index_of(&controls, "tile_size")] + ROW_HEIGHT / 2.0;
 
         let Some(Hit::Slider(_, v)) = hit(&controls, WINDOW_WIDTH, -500.0, y) else {
             panic!("no hit")

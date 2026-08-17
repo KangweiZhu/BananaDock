@@ -83,10 +83,12 @@ pub fn draw(
 
                     // The number goes left of the track, where there is room
                     // whatever the label's length.
-                    let shown = if *unit == "tiles" {
-                        format!("{value:.1} {unit}")
-                    } else {
-                        format!("{value:.0} {unit}")
+                    // Decimals have to match what `quantise` keeps, or the
+                    // number shown would not be the number saved.
+                    let shown = match *unit {
+                        "tiles" => format!("{value:.1} {unit}"),
+                        "of height" => format!("{value:.2} {unit}"),
+                        _ => format!("{value:.0} {unit}"),
                     };
                     let w = text.measure(&shown, LABEL_SIZE);
                     text.draw(
@@ -181,6 +183,9 @@ mod tests {
         let mut pixmap = Pixmap::new(ui::WINDOW_WIDTH as u32, h as u32).unwrap();
         let mut text = TextRenderer::new();
         draw(&mut pixmap, &mut text, &controls, ui::WINDOW_WIDTH, None);
+        if let Ok(path) = std::env::var("KDOCK_DUMP_SETTINGS") {
+            pixmap.save_png(path).unwrap();
+        }
         pixmap
     }
 
