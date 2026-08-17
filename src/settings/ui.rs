@@ -83,10 +83,12 @@ pub fn controls(config: &Config) -> Vec<Control> {
                 .icon_size
                 .unwrap_or(config.tile_size * DEFAULT_ICON_RATIO),
             min: 16.0,
-            // Capped at the spacing: a wider icon would overlap its
-            // neighbours, so the dock clamps it anyway. Letting the slider run
-            // past the point where it stops doing anything is just a lie.
-            max: config.tile_size,
+            // A fixed range, deliberately not capped at the spacing. The cap
+            // would be honest -- the dock clamps a wider icon anyway -- but
+            // tying `max` to `tile_size` rescales this slider's track whenever
+            // the spacing changes, so dragging the spacing visibly drags this
+            // knob too, which reads as one slider editing the other.
+            max: 96.0,
             unit: "pt",
         },
         Control::Slider {
@@ -298,6 +300,20 @@ mod tests {
                 Control::Toggle { key, .. } | Control::Slider { key, .. } => *key == wanted,
             })
             .unwrap_or_else(|| panic!("no control for {wanted}"))
+    }
+
+    /// The icon-size slider must not move when the spacing does. Its `max` was
+    /// once tied to `tile_size`, which rescaled the track on every spacing
+    /// write and made dragging one slider visibly drag the other's knob.
+    #[test]
+    fn changing_the_spacing_leaves_the_icon_slider_alone() {
+        let narrow = Config::parse("tile_size = 47.0\nicon_size = 37.0").unwrap();
+        let wide = Config::parse("tile_size = 96.0\nicon_size = 37.0").unwrap();
+
+        let a = controls(&narrow);
+        let b = controls(&wide);
+        let icon = index_of(&a, "icon_size");
+        assert_eq!(a[icon], b[index_of(&b, "icon_size")]);
     }
 
     #[test]
