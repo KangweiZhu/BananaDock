@@ -23,27 +23,46 @@ quietly when missing.
 | KWin (Plasma) | ✅ | ✅ via D-Bus | ✅ | Fully working, and the primary target |
 | GNOME (Mutter) | ❌ | ❌ | ❌ | **Cannot work.** See below |
 
-### How KWin works, and what it still cannot do
+### How KWin works
 
-KWin 6.7 implements no foreign-toplevel protocol a third-party client can use.
-Checked by enumerating its globals: neither `zwlr_foreign_toplevel_manager_v1`
-nor `ext_foreign_toplevel_list_v1` is advertised, and `org_kde_plasma_window_management`
-— which KWin does implement — is not offered to ordinary clients. A Qt build of
-this dock using `libtaskmanager` sees exactly the same 68 globals, so this is a
-KWin limitation rather than anything to do with the toolkit.
+KWin implements no *portable* foreign-toplevel protocol: neither
+`zwlr_foreign_toplevel_manager_v1` nor `ext_foreign_toplevel_list_v1` is
+advertised. It does implement its own `org_kde_plasma_window_management`, but
+withholds it from clients that have not asked for it by name.
 
-The window list therefore comes from inside KWin instead. On startup the dock
-loads a small script (`assets/kwin-windows.js`, compiled into the binary)
-through `org.kde.kwin.Scripting`. The script watches the workspace and pushes
-the window list — application class, title, active and minimised state — to a
-D-Bus service the dock exposes. Clicking an icon raises the window through
-KWin's own `WindowsRunner`. The script is unloaded when the dock exits, and
-re-loaded cleanly if a previous copy was left behind by a hard kill.
+Asking is done in the desktop entry:
 
-Minimising and closing travel the other way. Nothing outside KWin can call into
-a running script, so the script asks instead: it polls the dock a few times a
-second for queued commands and carries them out. That is the whole reason the
-context menu's Hide and Quit work on KWin at all.
+```ini
+X-KDE-Wayland-Interfaces=org_kde_plasma_window_management
+```
+
+KWin traces the connecting process back to a desktop entry and checks that
+list. Three details decide whether it works, and every one of them fails
+silently — the global simply never appears:
+
+* **`Exec=` must be the absolute path** to the binary that actually runs. A
+  bare command name does not resolve back to the entry.
+* **Entries are comma-separated.** KWin reads the key as a KConfig list, not as
+  the semicolon-separated list the desktop-entry spec defines. A trailing
+  semicolon makes the whole value unmatchable.
+* The entry has to be installed somewhere KWin will find it, such as
+  `~/.local/share/applications`. `NoDisplay` does not affect the grant.
+
+With the grant in place the dock uses the protocol directly: event-driven
+updates, activate, minimise, close, and `set_minimized_geometry`, which points
+KWin's minimise animation at the right slot in the dock.
+
+### The fallback, if the grant is missing
+
+Without it the dock loads a small script (`assets/kwin-windows.js`, compiled
+into the binary) through `org.kde.kwin.Scripting`. The script pushes the window
+list to a D-Bus service the dock exposes, and polls that same service a few
+times a second for commands to carry out. Clicking an icon raises the window
+through KWin's `WindowsRunner`.
+
+It works, but it is strictly worse — polled rather than event-driven, and it
+injects a script into the compositor — so it only runs when the native protocol
+was not granted.
 
 ### Why GNOME cannot work at all
 
@@ -78,6 +97,12 @@ The binary lands at `target/release/kdock`.
 To start it with the session, install the user service:
 
 ```bash
+# The desktop entry is what earns the dock its window list on KWin, and its
+# Exec= has to name the installed binary by absolute path.
+install -Dm755 target/release/kdock ~/.local/bin/kdock
+sed "s|^Exec=.*|Exec=$HOME/.local/bin/kdock|" dist/kdock.desktop \
+    > ~/.local/share/applications/kdock.desktop
+
 install -Dm644 dist/kdock.service ~/.config/systemd/user/kdock.service
 systemctl --user enable --now kdock.service
 ```

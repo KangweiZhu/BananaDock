@@ -27,5 +27,6 @@ toml_edit = "0.25.13"
 wayland-backend = { version = "0.3.17", features = ["log"] }
 wayland-client = "0.31.15"
 wayland-protocols = { version = "0.32.13", features = ["staging", "client"] }
+wayland-protocols-plasma = { version = "0.3", features = ["client"] }
 wayland-protocols-wlr = "0.3.12"
 zbus = { version = "5.19.0", features = ["blocking-api"] }

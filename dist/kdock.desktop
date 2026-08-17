@@ -3,12 +3,24 @@ Type=Application
 Name=kdock
 GenericName=Dock
 Comment=A macOS-style dock for Wayland
-Exec=kdock
+# MUST be the absolute path to the installed binary. KWin traces a client's
+# process back to a desktop entry through this, and grants the interfaces named
+# below only on a match -- a bare command name does not resolve and the grant
+# silently never happens. The install step rewrites this.
+Exec=/usr/bin/kdock
 Icon=user-desktop
 Terminal=false
 Categories=Utility;
+# KWin hands out org_kde_plasma_window_management only to clients whose desktop
+# entry asks for it. Parsed as a KConfig list, so entries are separated by
+# COMMAS and a trailing semicolon breaks the whole value -- neither of which
+# matches the desktop-entry spec, and both fail silently.
+X-KDE-Wayland-Interfaces=org_kde_plasma_window_management
 # The dock has no window of its own, so it must not appear in a task switcher
-# or in its own icon row.
+# or in its own icon row. Set this to false if you want to launch it by name
+# from KRunner or the application menu.
 NoDisplay=true
 X-GNOME-Autostart-enabled=false
-OnlyShowIn=KDE;Hyprland;niri;sway;Wayfire;river;COSMIC;
+# Values outside the registered set need an X- prefix, or desktop-file-validate
+# rejects the entry.
+OnlyShowIn=KDE;X-Hyprland;X-niri;X-Sway;X-Wayfire;X-river;X-COSMIC;

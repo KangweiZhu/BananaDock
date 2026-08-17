@@ -11,9 +11,11 @@
 //! and a foreign window's surface is not ours to hold.
 
 pub mod kwin;
+pub mod plasma;
 pub mod wlr;
 
 pub use kwin::KwinWindows;
+pub use plasma::PlasmaWindows;
 pub use wlr::ForeignToplevelManager;
 
 /// Identifies a toplevel for the lifetime of its protocol object.

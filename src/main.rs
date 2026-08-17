@@ -165,10 +165,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // changes, and -- on KWin -- window lists pushed in from the compositor.
     let (tx, rx) = channel::channel();
 
-    // KWin implements no foreign-toplevel protocol, so where the Wayland route
-    // is missing the dock falls back to talking to KWin over D-Bus.
+    // Where the portable Wayland route is missing, try KWin's own protocol
+    // next. It is only granted when the dock's .desktop file names the
+    // interface, so it can be absent even on Plasma.
+    let plasma = {
+        let p = windows::PlasmaWindows::new(&globals, &qh);
+        p.is_available().then_some(p)
+    };
+
+    // Last resort on KWin: drive a KWin script over D-Bus. Polled rather than
+    // event-driven, and it has to inject a script, so it is only used when the
+    // native protocol was not granted.
     let mut kwin = None;
-    if !toplevels.is_available() {
+    if !toplevels.is_available() && plasma.is_none() {
         let window_tx = tx.clone();
         // Shared with the D-Bus thread, which hands the queue to the script.
         let commands: windows::kwin::Commands = Default::default();
@@ -180,8 +189,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ) {
             Ok(conn) => kwin = Some(KwinWindows::new(Some(conn), commands)),
             Err(e) => eprintln!(
-                "kdock: no wlr-foreign-toplevel-management-v1 and no usable KWin \
-                 D-Bus route ({e}), so running windows cannot be shown."
+                "kdock: no window source available ({e}). On Plasma, install \
+                 kdock.desktop with \
+                 X-KDE-Wayland-Interfaces=org_kde_plasma_window_management \
+                 and an Exec= naming this binary."
             ),
         }
     }
@@ -202,6 +213,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         background_effect,
         blur_surface,
         toplevels,
+        plasma,
         kwin,
         launchers: LauncherIndex::load(),
         icons: IconCache::new(config.icon_theme.clone()),
@@ -567,7 +579,10 @@ struct App {
         wayland_protocols::ext::background_effect::v1::client::ext_background_effect_surface_v1::ExtBackgroundEffectSurfaceV1,
     >,
     toplevels: ForeignToplevelManager,
-    /// Present only when the Wayland route is unavailable and KWin answered.
+    /// KWin's own protocol, when its .desktop grant is in place.
+    plasma: Option<windows::PlasmaWindows>,
+    /// Present only when neither Wayland route is available and KWin answered
+    /// on D-Bus.
     kwin: Option<KwinWindows>,
     launchers: LauncherIndex,
     icons: IconCache,
@@ -632,10 +647,30 @@ struct App {
 
 impl App {
     /// Whichever window source this compositor supports.
+    /// Whichever window source this compositor supports, best first.
     fn windows(&self) -> &dyn WindowSource {
+        if let Some(plasma) = &self.plasma {
+            return plasma;
+        }
         match &self.kwin {
             Some(kwin) => kwin,
             None => &self.toplevels,
+        }
+    }
+
+    fn debug_dump_windows(&self, source: &str) {
+        if std::env::var_os("KDOCK_DEBUG").is_none() {
+            return;
+        }
+        eprintln!(
+            "-- {source}: {} window(s)",
+            self.windows().toplevels().len()
+        );
+        for t in self.windows().toplevels() {
+            eprintln!(
+                "   [{}] app_id={:?} active={} min={} title={:?}",
+                t.id, t.app_id, t.active, t.minimized, t.title
+            );
         }
     }
 
@@ -2018,6 +2053,19 @@ impl CompositorHandler for App {
         _: &wl_surface::WlSurface,
         _: &wl_output::WlOutput,
     ) {
+    }
+}
+
+impl windows::plasma::PlasmaWindowHandler for App {
+    fn plasma_state(&mut self) -> &mut windows::PlasmaWindows {
+        self.plasma
+            .as_mut()
+            .expect("the handler only runs while the protocol is bound")
+    }
+
+    fn plasma_windows_changed(&mut self, _: &Connection, _: &QueueHandle<Self>) {
+        self.debug_dump_windows("plasma");
+        self.draw();
     }
 }
 
