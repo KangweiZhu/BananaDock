@@ -224,6 +224,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         events: tx.clone(),
         visible_slots: Vec::new(),
         departing: Vec::new(),
+        entering: Vec::new(),
         minimize_targets_for: (Vec::new(), 0),
         pinned: config.pinned.clone(),
         config,
@@ -609,6 +610,8 @@ struct App {
     visible_slots: Vec<Slot>,
     /// Per entry of `visible_slots`: on its way out.
     departing: Vec<bool>,
+    /// Per entry of `visible_slots`: still growing in from nothing.
+    entering: Vec<bool>,
     /// Window list and surface width the minimise targets were computed for.
     minimize_targets_for: (Vec<(crate::windows::ToplevelId, bool)>, u32),
     /// Desktop entry ids the user pinned, in order.
@@ -784,23 +787,30 @@ impl App {
         let first_row = self.visible_slots.is_empty();
         let rest = self.slot_metrics(&merged);
 
-        let widths: Vec<f32> = merged
-            .iter()
-            .enumerate()
-            .map(|(i, slot)| {
-                self.visible_slots
-                    .iter()
-                    .position(|s| s.key == slot.key)
-                    .and_then(|j| self.current_widths.get(j).copied())
-                    .unwrap_or(if first_row {
-                        rest.get(i).map_or(0.0, |m| m.rest_width)
-                    } else {
-                        // A tile joining an existing row grows out of nothing,
-                        // parting its neighbours as it goes.
-                        0.0
-                    })
-            })
-            .collect();
+        let mut widths = Vec::with_capacity(merged.len());
+        let mut entering = Vec::with_capacity(merged.len());
+
+        for (i, slot) in merged.iter().enumerate() {
+            let previous = self.visible_slots.iter().position(|s| s.key == slot.key);
+            match previous {
+                Some(j) => {
+                    widths.push(self.current_widths.get(j).copied().unwrap_or(0.0));
+                    // Still growing until it reaches full width.
+                    entering.push(self.entering.get(j).copied().unwrap_or(false));
+                }
+                None if first_row => {
+                    widths.push(rest.get(i).map_or(0.0, |m| m.rest_width));
+                    entering.push(false);
+                }
+                None => {
+                    // A tile joining an existing row grows out of nothing,
+                    // parting its neighbours as it goes.
+                    widths.push(0.0);
+                    entering.push(true);
+                }
+            }
+        }
+        self.entering = entering;
 
         self.departing = merged
             .iter()
@@ -900,19 +910,48 @@ impl App {
             return false;
         }
 
-        let duration = self.metrics.magnify_duration_ms as f32;
+        let magnify = self.metrics.magnify_duration_ms as f32;
+        let row_change = self.metrics.row_change_ms as f32;
         let mut moving = false;
-        for (cur, &want) in self.current_widths.iter_mut().zip(&target_widths) {
+        let mut settled: Vec<usize> = Vec::new();
+        for (i, (cur, &want)) in self
+            .current_widths
+            .iter_mut()
+            .zip(&target_widths)
+            .enumerate()
+        {
+            // A tile joining or leaving the row moves on its own, slower clock;
+            // everything else is tracking the pointer and must stay snappy.
+            let duration = if self.departing.get(i).copied().unwrap_or(false)
+                || self.entering.get(i).copied().unwrap_or(false)
+            {
+                row_change
+            } else {
+                magnify
+            };
             let next = layout::approach(*cur, want, dt_ms, duration);
             // Below a fraction of a pixel the difference cannot be drawn, so
             // settle exactly rather than easing forever.
             if (want - next).abs() < 0.05 {
                 *cur = want;
+                settled.push(i);
             } else {
                 *cur = next;
                 moving = true;
             }
         }
+        for i in settled {
+            if let Some(flag) = self.entering.get_mut(i) {
+                *flag = false;
+            }
+        }
+
+        if std::env::var_os("KDOCK_DEBUG_ANIM").is_some() {
+            let w: Vec<i32> = self.current_widths.iter().map(|w| *w as i32).collect();
+            let t: Vec<i32> = target_widths.iter().map(|w| *w as i32).collect();
+            eprintln!("ANIM dt={dt_ms:.0} cur={w:?} tgt={t:?} moving={moving}");
+        }
+
         // A tile that has finished shrinking has nothing left to draw and must
         // not keep taking up an index, or hit testing would answer with a tile
         // the user cannot see.
@@ -927,6 +966,7 @@ impl App {
             self.visible_slots.remove(i);
             self.current_widths.remove(i);
             self.departing.remove(i);
+            self.entering.remove(i);
         }
 
         moving
@@ -2201,12 +2241,19 @@ impl CompositorHandler for App {
     ) {
         self.frame_pending = false;
 
-        // A long gap means the dock was idle, not that a huge step is due;
-        // clamping keeps a resumed animation from lurching.
+        // Idle time is not animation time. The dock asks for no frames while
+        // nothing moves, so the gap since the last callback is however long it
+        // sat still -- and feeding that to the easing makes a fresh animation
+        // finish in its first step. The clock is cleared when the dock settles,
+        // so a resumed animation starts from a nominal frame instead.
+        //
+        // The cap covers the other case: a stall mid-animation. It has to stay
+        // well under `magnify_duration_ms`, or one dropped frame still swallows
+        // the whole animation.
         let dt = self
             .last_frame_ms
             .map_or(16.0, |prev| time.wrapping_sub(prev) as f32)
-            .clamp(1.0, 100.0);
+            .clamp(1.0, 32.0);
         self.last_frame_ms = Some(time);
 
         self.prune_launching();
@@ -2232,6 +2279,10 @@ impl CompositorHandler for App {
         self.draw();
         if moving {
             self.request_frame(qh);
+        } else {
+            // Settled. Forget the clock so the next animation starts from a
+            // nominal frame rather than from however long the dock sat idle.
+            self.last_frame_ms = None;
         }
     }
 

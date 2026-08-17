@@ -81,6 +81,12 @@ pub struct Metrics {
     // -- Animation --------------------------------------------------------
     /// How tightly magnification tracks the cursor.
     pub magnify_duration_ms: u32,
+    /// How long a tile takes to grow in or shrink away when the row changes.
+    ///
+    /// Deliberately slower than `magnify_duration_ms`: magnification has to
+    /// track the pointer tightly, but a tile appearing is a change the eye
+    /// should be able to follow.
+    pub row_change_ms: u32,
     /// One launch hop.
     pub bounce_duration_ms: u32,
     pub bounce_rest_duration_ms: u32,
@@ -124,6 +130,7 @@ impl Default for Metrics {
             menu_separator_height: 9.0, // [measure]
 
             magnify_duration_ms: 90,      // [measure]
+            row_change_ms: 220,           // [measure]
             bounce_duration_ms: 620,      // [measure]
             bounce_rest_duration_ms: 180, // [measure]
             bounce_height: 28.0,          // [measure]

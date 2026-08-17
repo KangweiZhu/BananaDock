@@ -393,6 +393,28 @@ mod tests {
         );
     }
 
+    /// Why the caller has to cap `dt_ms` well below the duration: a single step
+    /// longer than the animation finishes it outright. The dock asks for no
+    /// frames while it is still, so an uncapped gap since the last callback is
+    /// however long it sat idle -- and feeding that in makes a fresh animation
+    /// land on its first frame, which looks exactly like no animation at all.
+    #[test]
+    fn a_step_longer_than_the_duration_finishes_it_outright() {
+        let after = approach(0.0, 100.0, 100.0, 90.0);
+        assert!(after > 96.0, "expected essentially finished, got {after}");
+    }
+
+    /// At a plausible frame time the same animation has barely started, which
+    /// is what leaves room for the frames in between to be seen.
+    #[test]
+    fn one_frame_moves_only_part_of_the_way() {
+        let after = approach(0.0, 100.0, 16.0, 220.0);
+        assert!(
+            (5.0..30.0).contains(&after),
+            "expected a small first step, got {after}"
+        );
+    }
+
     #[test]
     fn approach_with_no_duration_snaps() {
         assert_eq!(approach(0.0, 100.0, 16.0, 0.0), 100.0);
