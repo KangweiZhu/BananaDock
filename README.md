@@ -20,7 +20,7 @@ quietly when missing.
 |---|---|---|---|---|
 | niri | ✅ | ✅ | ✅ | Fully working |
 | Hyprland, sway, Wayfire, river, cosmic | ✅ | ✅ | own mechanism | Expected to work; **not yet tested** |
-| KWin (Plasma) | ✅ | ✅ via D-Bus | ✅ | Fully working, and the primary target. Cannot minimise or close from the dock |
+| KWin (Plasma) | ✅ | ✅ via D-Bus | ✅ | Fully working, and the primary target |
 | GNOME (Mutter) | ❌ | ❌ | ❌ | **Cannot work.** See below |
 
 ### How KWin works, and what it still cannot do
@@ -40,9 +40,10 @@ D-Bus service the dock exposes. Clicking an icon raises the window through
 KWin's own `WindowsRunner`. The script is unloaded when the dock exits, and
 re-loaded cleanly if a previous copy was left behind by a hard kill.
 
-What this route cannot do is minimise or close a *specific* window: the runner
-only raises, and nothing can call into a running KWin script. Those entries are
-omitted from the context menu on KWin rather than offered and ignored.
+Minimising and closing travel the other way. Nothing outside KWin can call into
+a running script, so the script asks instead: it polls the dock a few times a
+second for queued commands and carries them out. That is the whole reason the
+context menu's Hide and Quit work on KWin at all.
 
 ### Why GNOME cannot work at all
 

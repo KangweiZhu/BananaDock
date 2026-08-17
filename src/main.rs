@@ -170,10 +170,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut kwin = None;
     if !toplevels.is_available() {
         let window_tx = tx.clone();
-        match windows::kwin::start(Box::new(move |snapshot| {
-            let _ = window_tx.send(Watched::Windows(snapshot));
-        })) {
-            Ok(conn) => kwin = Some(KwinWindows::new(Some(conn))),
+        // Shared with the D-Bus thread, which hands the queue to the script.
+        let commands: windows::kwin::Commands = Default::default();
+        match windows::kwin::start(
+            Box::new(move |snapshot| {
+                let _ = window_tx.send(Watched::Windows(snapshot));
+            }),
+            commands.clone(),
+        ) {
+            Ok(conn) => kwin = Some(KwinWindows::new(Some(conn), commands)),
             Err(e) => eprintln!(
                 "kdock: no wlr-foreign-toplevel-management-v1 and no usable KWin \
                  D-Bus route ({e}), so running windows cannot be shown."
@@ -639,7 +644,10 @@ impl App {
             kwin.apply(snapshot);
         }
         if std::env::var_os("KDOCK_DEBUG").is_some() {
-            eprintln!("-- kwin push: {} window(s)", self.windows().toplevels().len());
+            eprintln!(
+                "-- kwin push: {} window(s)",
+                self.windows().toplevels().len()
+            );
             for t in self.windows().toplevels() {
                 eprintln!(
                     "   [{}] app_id={:?} active={} min={} title={:?}",
@@ -915,7 +923,12 @@ impl App {
         self.set_keyboard_focusable(true);
 
         let pinned = self.pinned.contains(&slot.key);
-        let items = menu::build_menu(slot, self.windows().toplevels(), pinned, self.windows().capabilities());
+        let items = menu::build_menu(
+            slot,
+            self.windows().toplevels(),
+            pinned,
+            self.windows().capabilities(),
+        );
         if items.is_empty() {
             return;
         }

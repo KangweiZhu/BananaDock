@@ -58,6 +58,61 @@ function push() {
     callDBus(SERVICE, PATH, IFACE, "Update", snapshot());
 }
 
+// --- Commands, dock to KWin --------------------------------------------
+//
+// Nothing outside KWin can call into a running script, so commands travel the
+// only direction that works: the script asks for them. The dock queues a
+// command when a menu entry is chosen and it is picked up on the next tick.
+//
+// Polling rather than a held reply because it is the simpler of the two and the
+// cost is trivial -- a handful of local D-Bus round trips a second, each one a
+// short string.
+
+function windowByUuid(uuid) {
+    var wins = windowList();
+    for (var i = 0; i < wins.length; ++i) {
+        if (String(wins[i].internalId) === uuid) {
+            return wins[i];
+        }
+    }
+    return null;
+}
+
+function execute(commands) {
+    if (!commands) {
+        return;
+    }
+    var records = String(commands).split(RS);
+    for (var i = 0; i < records.length; ++i) {
+        if (!records[i]) {
+            continue;
+        }
+        var f = records[i].split(FS);
+        // The window may have closed between the dock queuing this and now.
+        var w = windowByUuid(f[1]);
+        if (!w) {
+            continue;
+        }
+        if (f[0] === "min") {
+            w.minimized = true;
+        } else if (f[0] === "unmin") {
+            w.minimized = false;
+        } else if (f[0] === "close") {
+            w.closeWindow();
+        }
+    }
+}
+
+// Held at the top level: a timer is a QObject, and the reference has to outlive
+// the function that created it.
+var commandTimer = new QTimer();
+commandTimer.singleShot = false;
+commandTimer.interval = 150;
+commandTimer.timeout.connect(function () {
+    callDBus(SERVICE, PATH, IFACE, "TakeCommands", execute);
+});
+commandTimer.start();
+
 // Per-window signals: the workspace-level ones do not fire when a window is
 // merely minimised or retitled.
 function watch(w) {

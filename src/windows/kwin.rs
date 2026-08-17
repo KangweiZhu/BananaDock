@@ -12,7 +12,10 @@
 //! dock exposes. Activation goes back the other way through KWin's
 //! `WindowsRunner`, which already accepts a window id and raises it.
 
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 use super::{Capabilities, Toplevel, ToplevelId, WindowSource};
 
@@ -43,7 +46,13 @@ pub struct KwinWindows {
     /// have to stay put across snapshots; KWin's own ids are UUID strings.
     ids: Ids,
     connection: Option<zbus::blocking::Connection>,
+    /// Commands waiting for the script to collect. Shared with the D-Bus
+    /// thread, which hands them over and clears the queue.
+    commands: Commands,
 }
+
+/// Queued instructions for the KWin script.
+pub type Commands = Arc<Mutex<Vec<String>>>;
 
 #[derive(Default)]
 struct Ids {
@@ -70,11 +79,23 @@ impl Ids {
 }
 
 impl KwinWindows {
-    pub fn new(connection: Option<zbus::blocking::Connection>) -> Self {
+    pub fn new(connection: Option<zbus::blocking::Connection>, commands: Commands) -> Self {
         Self {
             toplevels: Vec::new(),
             ids: Ids::default(),
             connection,
+            commands,
+        }
+    }
+
+    /// Queues an instruction for the script's next poll.
+    fn queue(&self, op: &str, id: ToplevelId) {
+        let Some(uuid) = self.uuid_of(id) else {
+            return;
+        };
+        let record = format!("{op}{FS}{uuid}");
+        if let Ok(mut q) = self.commands.lock() {
+            q.push(record);
         }
     }
 
@@ -142,12 +163,8 @@ impl WindowSource for KwinWindows {
     }
 
     fn capabilities(&self) -> Capabilities {
-        // KWin's runner only raises. A script could do more, but nothing can
-        // call into a running KWin script, so there is no route back in.
-        Capabilities {
-            minimize: false,
-            close: false,
-        }
+        // Everything the wlr route offers, via the script's command queue.
+        Capabilities::default()
     }
 
     fn activate(&self, id: ToplevelId) {
@@ -158,14 +175,12 @@ impl WindowSource for KwinWindows {
         }
     }
 
-    fn set_minimized(&self, _id: ToplevelId, _minimized: bool) {
-        // KWin offers no D-Bus route to minimise a specific window: the runner
-        // only raises, and a script cannot be called into. Restoring happens
-        // implicitly, since raising a minimised window unminimises it.
+    fn set_minimized(&self, id: ToplevelId, minimized: bool) {
+        self.queue(if minimized { "min" } else { "unmin" }, id);
     }
 
-    fn close(&self, _id: ToplevelId) {
-        // Same gap as `set_minimized`.
+    fn close(&self, id: ToplevelId) {
+        self.queue("close", id);
     }
 
     fn set_icon_rect(
@@ -225,6 +240,7 @@ pub type Push = Box<dyn Fn(String) + Send + Sync + 'static>;
 /// The dock's own D-Bus interface, which the KWin script pushes into.
 struct WindowsService {
     push: Push,
+    commands: Commands,
 }
 
 #[zbus::interface(name = "org.kde.kdock.Windows")]
@@ -232,6 +248,19 @@ impl WindowsService {
     /// Called by the KWin script whenever the window list changes.
     fn update(&self, snapshot: String) {
         (self.push)(snapshot);
+    }
+
+    /// Polled by the script. Hands over everything queued and clears it, so a
+    /// command is never carried out twice.
+    fn take_commands(&self) -> String {
+        match self.commands.lock() {
+            Ok(mut q) if !q.is_empty() => {
+                let out = q.join(&RS.to_string());
+                q.clear();
+                out
+            }
+            _ => String::new(),
+        }
     }
 }
 
@@ -250,12 +279,15 @@ pub fn is_available(conn: &zbus::blocking::Connection) -> bool {
 /// Brings up the D-Bus service and gets the KWin script running.
 ///
 /// Returns the connection, which doubles as the channel for activation calls.
-pub fn start(push: Push) -> Result<zbus::blocking::Connection, Box<dyn std::error::Error>> {
+pub fn start(
+    push: Push,
+    commands: Commands,
+) -> Result<zbus::blocking::Connection, Box<dyn std::error::Error>> {
     // The service has to answer before the script runs, or the script's first
     // push lands on nothing and the dock starts out empty.
     let conn = zbus::blocking::connection::Builder::session()?
         .name(OUR_SERVICE)?
-        .serve_at(OUR_PATH, WindowsService { push })?
+        .serve_at(OUR_PATH, WindowsService { push, commands })?
         .build()?;
 
     if !is_available(&conn) {
@@ -359,7 +391,10 @@ mod tests {
     /// A truncated record must not take the rest of the snapshot with it.
     #[test]
     fn short_records_fall_back_to_empty_fields() {
-        let snap = format!("{{aaa}}{FS}konsole{RS}{}", record("{bbb}", "f", "t", "1", "0"));
+        let snap = format!(
+            "{{aaa}}{FS}konsole{RS}{}",
+            record("{bbb}", "f", "t", "1", "0")
+        );
         let rows = parse_snapshot(&snap);
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].title, "");
@@ -377,7 +412,7 @@ mod tests {
     /// must keep the same one.
     #[test]
     fn ids_are_stable_across_snapshots() {
-        let mut w = KwinWindows::new(None);
+        let mut w = KwinWindows::new(None, Commands::default());
         let first = [
             record("{aaa}", "konsole", "zsh", "1", "0"),
             record("{bbb}", "firefox", "News", "0", "0"),
@@ -401,17 +436,78 @@ mod tests {
 
     #[test]
     fn closed_windows_stop_taking_up_ids() {
-        let mut w = KwinWindows::new(None);
-        w.apply(&[
-            record("{aaa}", "a", "a", "0", "0"),
-            record("{bbb}", "b", "b", "0", "0"),
-        ]
-        .join(&RS.to_string()));
+        let mut w = KwinWindows::new(None, Commands::default());
+        w.apply(
+            &[
+                record("{aaa}", "a", "a", "0", "0"),
+                record("{bbb}", "b", "b", "0", "0"),
+            ]
+            .join(&RS.to_string()),
+        );
         assert_eq!(w.ids.by_uuid.len(), 2);
 
         w.apply(&record("{aaa}", "a", "a", "0", "0"));
         assert_eq!(w.ids.by_uuid.len(), 1);
         assert_eq!(w.toplevels().len(), 1);
+    }
+
+    /// Commands are addressed by KWin's uuid, not by our synthetic id, since
+    /// the script only knows the former.
+    #[test]
+    fn queued_commands_carry_the_kwin_uuid() {
+        let commands = Commands::default();
+        let mut w = KwinWindows::new(None, commands.clone());
+        w.apply(&record("{aaa}", "konsole", "zsh", "1", "0"));
+        let id = w.toplevels()[0].id;
+
+        w.set_minimized(id, true);
+        w.close(id);
+
+        let queued = commands.lock().unwrap().clone();
+        assert_eq!(
+            queued,
+            vec![format!("min{FS}{{aaa}}"), format!("close{FS}{{aaa}}")]
+        );
+    }
+
+    #[test]
+    fn unminimising_queues_the_opposite_command() {
+        let commands = Commands::default();
+        let mut w = KwinWindows::new(None, commands.clone());
+        w.apply(&record("{aaa}", "konsole", "zsh", "0", "1"));
+        let id = w.toplevels()[0].id;
+
+        w.set_minimized(id, false);
+        assert_eq!(commands.lock().unwrap()[0], format!("unmin{FS}{{aaa}}"));
+    }
+
+    /// A command for a window the dock no longer knows about must not queue a
+    /// record with an empty target, which the script would silently skip while
+    /// looking like it worked.
+    #[test]
+    fn commands_for_unknown_windows_are_dropped() {
+        let commands = Commands::default();
+        let w = KwinWindows::new(None, commands.clone());
+        w.close(999);
+        assert!(commands.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn taking_commands_clears_the_queue() {
+        let commands = Commands::default();
+        let service = WindowsService {
+            push: Box::new(|_| {}),
+            commands: commands.clone(),
+        };
+        commands.lock().unwrap().push("min\u{1f}{aaa}".to_owned());
+        commands.lock().unwrap().push("close\u{1f}{bbb}".to_owned());
+
+        let taken = service.take_commands();
+        assert!(taken.contains("{aaa}") && taken.contains("{bbb}"));
+        assert_eq!(taken.split(RS).count(), 2);
+        // Draining matters: a command carried out twice would close two windows.
+        assert!(commands.lock().unwrap().is_empty());
+        assert!(service.take_commands().is_empty());
     }
 
     #[test]
