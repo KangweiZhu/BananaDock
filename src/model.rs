@@ -203,34 +203,76 @@ pub fn build_slots_with(
     slots
 }
 
-/// Which tile stands for each window, for the compositor's minimise animation.
+/// Where each window's tile sits, or would sit once it is minimised.
 ///
-/// A window must be reported exactly once. While it is minimised its tile is
-/// the one that represents it, not its application's icon -- reporting both
-/// leaves the compositor to choose, and KWin animates towards whichever it
-/// heard about last before the window went away.
+/// The compositor reads this when the window *leaves* and reuses it for the
+/// journey back, so telling it after the window is already minimised is too
+/// late -- by then it has committed to whatever it was told last, which is the
+/// application's icon. A window that is still on screen therefore has to be
+/// told where its tile is *going* to appear.
 ///
-/// Returns `(slot index, window id)` pairs, in slot order.
-pub fn icon_rect_targets(slots: &[Slot], minimized: &[ToplevelId]) -> Vec<(usize, ToplevelId)> {
-    // Windows that have a tile of their own. Suppressing the application icon
-    // for a minimised window only makes sense when something else took over --
-    // with the separate tiles switched off, the icon is all there is.
-    let has_own_tile: Vec<ToplevelId> = slots
-        .iter()
-        .filter(|s| s.kind == SlotKind::MinimizedWindow)
-        .flat_map(|s| s.windows.iter().copied())
-        .collect();
-
+/// Returns `(slot index, window id)` pairs. The slot index refers to the layout
+/// built with that window minimised, which is why each entry carries its own.
+pub fn minimize_targets(
+    pinned: &[String],
+    toplevels: &[Toplevel],
+    index: &LauncherIndex,
+    trash: Option<TrashState>,
+    separate_minimized: bool,
+) -> Vec<WindowTarget> {
     let mut out = Vec::new();
-    for (i, slot) in slots.iter().enumerate() {
-        for &id in &slot.windows {
-            if slot.kind == SlotKind::App && minimized.contains(&id) && has_own_tile.contains(&id) {
-                continue;
+
+    for t in toplevels {
+        // Already minimised: its tile exists, so use the layout as it stands.
+        let hypothetical = if t.minimized { None } else { Some(t.id) };
+        let slots = match hypothetical {
+            None => build_slots_with(pinned, toplevels, index, trash, separate_minimized),
+            Some(id) => {
+                let pretend: Vec<Toplevel> = toplevels
+                    .iter()
+                    .map(|w| {
+                        let mut w = w.clone();
+                        if w.id == id {
+                            w.minimized = true;
+                        }
+                        w
+                    })
+                    .collect();
+                build_slots_with(pinned, &pretend, index, trash, separate_minimized)
             }
-            out.push((i, id));
+        };
+
+        let slot = slots
+            .iter()
+            .position(|s| s.kind == SlotKind::MinimizedWindow && s.windows.contains(&t.id))
+            // With the separate tiles switched off there is no such tile, so
+            // the application's icon is the only place to point at.
+            .or_else(|| {
+                slots
+                    .iter()
+                    .position(|s| s.kind == SlotKind::App && s.windows.contains(&t.id))
+            });
+
+        if let Some(slot) = slot {
+            out.push(WindowTarget {
+                window: t.id,
+                slot,
+                slots,
+            });
         }
     }
+
     out
+}
+
+/// One window and the row it would be laid out in.
+#[derive(Debug, Clone)]
+pub struct WindowTarget {
+    pub window: ToplevelId,
+    /// Index into `slots`.
+    pub slot: usize,
+    /// The row as it stands, or as it would stand with this window minimised.
+    pub slots: Vec<Slot>,
 }
 
 /// Whether the Trash currently holds anything.
@@ -415,41 +457,70 @@ mod tests {
         );
     }
 
-    /// A minimised window is represented by its own tile, and only by that.
+    /// The point of the whole exercise: a window still on screen is told where
+    /// its tile is *going* to be, because the compositor stops listening once
+    /// the window is gone.
     #[test]
-    fn a_minimized_window_is_reported_once_and_by_its_own_tile() {
-        let tops = vec![minimized(1, "myapp", "Doc")];
-        let slots = build_slots(&[], &tops, &LauncherIndex::default(), None);
-        let targets = icon_rect_targets(&slots, &[1]);
-
-        assert_eq!(targets.len(), 1, "reported more than once: {targets:?}");
-        let (index, id) = targets[0];
-        assert_eq!(id, 1);
-        assert_eq!(slots[index].kind, SlotKind::MinimizedWindow);
-    }
-
-    /// A window that is *not* minimised is represented by its application tile.
-    #[test]
-    fn a_visible_window_is_reported_by_its_application_tile() {
+    fn a_visible_window_is_pointed_at_its_future_tile() {
         let tops = vec![toplevel(1, "myapp", true)];
-        let slots = build_slots(&[], &tops, &LauncherIndex::default(), None);
-        let targets = icon_rect_targets(&slots, &[]);
+        let targets = minimize_targets(&[], &tops, &LauncherIndex::default(), None, true);
 
         assert_eq!(targets.len(), 1);
-        assert_eq!(slots[targets[0].0].kind, SlotKind::App);
+        let t = &targets[0];
+        assert_eq!(t.window, 1);
+        assert_eq!(
+            t.slots[t.slot].kind,
+            SlotKind::MinimizedWindow,
+            "a visible window should aim at the tile it will get, not its app icon"
+        );
     }
 
-    /// With the separate tiles switched off there is no other tile to fall back
-    /// on, so the application icon has to keep reporting -- otherwise the
-    /// window would animate towards nowhere.
+    /// An already-minimised window points at the tile it actually has.
     #[test]
-    fn folded_minimized_windows_still_report_through_the_app_tile() {
+    fn a_minimized_window_points_at_its_real_tile() {
         let tops = vec![minimized(1, "myapp", "Doc")];
-        let slots = build_slots_with(&[], &tops, &LauncherIndex::default(), None, false);
-        let targets = icon_rect_targets(&slots, &[1]);
+        let targets = minimize_targets(&[], &tops, &LauncherIndex::default(), None, true);
 
-        assert_eq!(targets.len(), 1);
-        assert_eq!(slots[targets[0].0].kind, SlotKind::App);
+        let t = &targets[0];
+        assert_eq!(t.slots[t.slot].kind, SlotKind::MinimizedWindow);
+        assert!(t.slots[t.slot].windows.contains(&1));
+    }
+
+    /// The predicted tile must be the one for *that* window, not just any
+    /// minimised tile that happens to exist.
+    #[test]
+    fn prediction_picks_the_right_tile_among_several() {
+        let tops = vec![
+            minimized(1, "a", "Already"),
+            toplevel(2, "b", false),
+            minimized(3, "c", "AlsoAlready"),
+        ];
+        let targets = minimize_targets(&[], &tops, &LauncherIndex::default(), None, true);
+
+        let t = targets.iter().find(|t| t.window == 2).unwrap();
+        assert!(
+            t.slots[t.slot].windows.contains(&2),
+            "pointed at someone else's tile"
+        );
+        // Three minimised tiles once window 2 joins them.
+        assert_eq!(
+            t.slots
+                .iter()
+                .filter(|s| s.kind == SlotKind::MinimizedWindow)
+                .count(),
+            3
+        );
+    }
+
+    /// With separate tiles switched off there is no future tile, so the
+    /// application icon is the only honest target.
+    #[test]
+    fn folded_mode_falls_back_to_the_application_icon() {
+        let tops = vec![toplevel(1, "myapp", true)];
+        let targets = minimize_targets(&[], &tops, &LauncherIndex::default(), None, false);
+
+        let t = &targets[0];
+        assert_eq!(t.slots[t.slot].kind, SlotKind::App);
     }
 
     #[test]

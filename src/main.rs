@@ -222,6 +222,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // same session bus the window fallback uses.
         thumbnails: thumbnails::ThumbnailCache::new(zbus::blocking::Connection::session().ok()),
         events: tx.clone(),
+        minimize_targets_for: (Vec::new(), 0),
         pinned: config.pinned.clone(),
         config,
         config_path,
@@ -601,6 +602,8 @@ struct App {
     thumbnails: thumbnails::ThumbnailCache,
     /// Captures finish on their own threads and report back through here.
     events: channel::Sender<Watched>,
+    /// Window list and surface width the minimise targets were computed for.
+    minimize_targets_for: (Vec<(crate::windows::ToplevelId, bool)>, u32),
     /// Desktop entry ids the user pinned, in order.
     pinned: Vec<String>,
     config: Config,
@@ -941,7 +944,7 @@ impl App {
         };
         self.dock.set_input_region(&self.compositor, &[region]);
 
-        self.publish_icon_rects(&slots, &geometry, panel);
+        self.publish_icon_rects();
         self.set_blur(panel);
 
         // The viewport has to say what the buffer stands for before it is
@@ -1190,34 +1193,71 @@ impl App {
     /// This is what makes a minimise animation fly into the right icon instead
     /// of into the middle of the screen. Coordinates are surface-local, which
     /// is what the protocol asks for.
-    fn publish_icon_rects(&self, slots: &[Slot], geometry: &Layout, panel: tiny_skia::Rect) {
-        let row_x = panel.x() + self.metrics.pt(self.metrics.panel_padding_h);
-        let surface = self.dock.layer().wl_surface();
-
-        // While a window is minimised, the thing in the dock that stands for it
-        // is its own tile, not its application's icon. Reporting both would
-        // leave the compositor to pick, and KWin animates from whichever it was
-        // told about when the window went away -- which is the application icon
-        // unless the application's tile is kept quiet.
-        let minimized: Vec<crate::windows::ToplevelId> = self
+    /// Tells the compositor which part of the dock stands for each window.
+    ///
+    /// This is what makes a minimise animation fly into the right tile instead
+    /// of into the middle of the screen. Coordinates are surface-local, which
+    /// is what the protocol asks for.
+    ///
+    /// A window still on screen is pointed at the tile it is *going* to get,
+    /// not at its application's icon: KWin reads the geometry as the window
+    /// leaves and reuses it for the journey back, so anything published after
+    /// the fact arrives too late to matter.
+    ///
+    /// Only redone when the window list moves. The targets are resting
+    /// positions -- magnification does not change where a window will land --
+    /// so simulating a layout per window on every frame would be pure waste.
+    fn publish_icon_rects(&mut self) {
+        let signature: Vec<(crate::windows::ToplevelId, bool)> = self
             .windows()
             .toplevels()
             .iter()
-            .filter(|t| t.minimized)
-            .map(|t| t.id)
+            .map(|t| (t.id, t.minimized))
             .collect();
+        let width = self.dock.width;
+        if self.minimize_targets_for == (signature.clone(), width) {
+            return;
+        }
+        self.minimize_targets_for = (signature, width);
 
-        for (index, id) in model::icon_rect_targets(slots, &minimized) {
-            let Some(geom) = geometry.slots.get(index) else {
+        let targets = model::minimize_targets(
+            &self.pinned,
+            self.windows().toplevels(),
+            &self.launchers,
+            self.config.show_trash.then_some(self.trash),
+            self.config.separate_minimized,
+        );
+
+        let surface = self.dock.layer().wl_surface();
+        let logical_h = self.metrics.surface_height();
+
+        for target in targets {
+            // Each window gets the row as it would be with *that* window
+            // minimised, so the tile positions have to come from its own layout.
+            let metrics = self.slot_metrics(&target.slots);
+            let geometry = layout::layout(&metrics, None, &self.metrics);
+            let Some(geom) = geometry.slots.get(target.slot) else {
                 continue;
             };
-            let rect = (
-                (row_x + geom.x).round() as i32,
-                panel.y().round() as i32,
-                geom.width.round() as i32,
-                panel.height().round() as i32,
+
+            let panel = render::panel_rect(
+                width as f32,
+                logical_h,
+                &self.metrics,
+                geometry.content_width,
             );
-            self.windows().set_icon_rect(id, surface, rect);
+            let row_x = panel.x() + self.metrics.pt(self.metrics.panel_padding_h);
+
+            self.windows().set_icon_rect(
+                target.window,
+                surface,
+                (
+                    (row_x + geom.x).round() as i32,
+                    panel.y().round() as i32,
+                    geom.width.round() as i32,
+                    panel.height().round() as i32,
+                ),
+            );
         }
     }
 
