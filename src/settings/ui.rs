@@ -83,7 +83,10 @@ pub fn controls(config: &Config) -> Vec<Control> {
                 .icon_size
                 .unwrap_or(config.tile_size * DEFAULT_ICON_RATIO),
             min: 16.0,
-            max: 96.0,
+            // Capped at the spacing: a wider icon would overlap its
+            // neighbours, so the dock clamps it anyway. Letting the slider run
+            // past the point where it stops doing anything is just a lie.
+            max: config.tile_size,
             unit: "pt",
         },
         Control::Slider {

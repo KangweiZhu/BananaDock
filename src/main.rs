@@ -446,7 +446,13 @@ fn watch_dir(
 /// transparent background the result would be all but invisible. The grey is
 /// synthetic -- it is not part of the dock.
 fn dump_frame(path: &str, width: u32, ids: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    let metrics = Metrics::default();
+    // Reads the real configuration, so a preview shows what the dock would
+    // actually draw rather than what the defaults would.
+    let mut metrics = Metrics::default();
+    if let Some(config_path) = config::Config::path() {
+        config::Config::load(&config_path).apply_to(&mut metrics);
+    }
+    let metrics = metrics;
     let palette = Palette::default();
     let height = metrics.surface_height().ceil() as u32;
 

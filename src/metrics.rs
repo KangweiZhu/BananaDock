@@ -46,6 +46,13 @@ pub struct Metrics {
     /// Tahoe's dock is a capsule -- the end caps are semicircular, so the
     /// radius is exactly half the height.
     pub panel_radius_ratio: f32,
+    /// Share of the panel's height the artwork occupies in the reference:
+    /// 45 of 89, with 20 above and 24 below.
+    ///
+    /// The artwork's size can be set independently of the tile pitch, so this
+    /// is what keeps the panel from being outgrown: past this fraction the
+    /// panel gets taller rather than letting the icon push through its edges.
+    pub icon_panel_fraction: f32,
 
     // -- Auto-hide ---------------------------------------------------------
     /// How long the pointer must be away before the dock slides out.
@@ -104,11 +111,12 @@ impl Default for Metrics {
             magnification_range: 2.5, // [measure]
             magnification_enabled: true,
 
-            panel_padding_h: 8.0,      // [measure]
-            panel_bottom_gap: 8.0,     // [measure]
-            panel_height_ratio: 1.33,  // [reference] 89/67
-            icon_top_pad_ratio: 0.225, // [reference] 20/89
-            panel_radius_ratio: 0.5,   // [reference] semicircular end caps
+            panel_padding_h: 8.0,        // [measure]
+            panel_bottom_gap: 8.0,       // [measure]
+            panel_height_ratio: 1.33,    // [reference] 89/67
+            icon_top_pad_ratio: 0.225,   // [reference] 20/89
+            panel_radius_ratio: 0.5,     // [reference] semicircular end caps
+            icon_panel_fraction: 0.5056, // [reference] 45/89
 
             auto_hide_delay_ms: 500, // [measure]
             auto_hide_slide_ms: 180, // [measure]
@@ -148,8 +156,21 @@ impl Metrics {
         self.tile_size * self.icon_size_ratio
     }
 
+    /// The panel is sized from the tile pitch, but never smaller than the
+    /// artwork needs.
+    ///
+    /// Without the second term a large icon simply grows through the panel:
+    /// `icon_bottom_margin` goes negative and the artwork hangs out of both
+    /// edges. Letting the panel grow instead keeps the margins the reference
+    /// calls for whatever size the icon is set to.
     pub fn panel_height(&self) -> f32 {
-        self.tile_size * self.panel_height_ratio
+        let from_pitch = self.tile_size * self.panel_height_ratio;
+        let from_icon = if self.icon_panel_fraction > 0.0 {
+            self.icon_size() / self.icon_panel_fraction
+        } else {
+            0.0
+        };
+        from_pitch.max(from_icon)
     }
 
     pub fn panel_radius(&self) -> f32 {
@@ -261,6 +282,62 @@ impl Default for Palette {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// However large the artwork is set, it has to keep the reference's
+    /// breathing room inside the panel rather than growing through its edges.
+    #[test]
+    fn a_large_icon_makes_the_panel_grow_instead_of_overflowing() {
+        for ratio in [0.3, 0.5, 0.67, 0.9, 1.0] {
+            let m = Metrics {
+                icon_size_ratio: ratio,
+                ..Metrics::default()
+            };
+            let margin = m.icon_bottom_margin();
+            assert!(
+                margin >= 0.0,
+                "ratio {ratio}: icon hangs {margin} below the panel"
+            );
+            // ...and it has to fit above, too.
+            let top = m.panel_height() - margin - m.icon_size();
+            assert!(
+                top >= 0.0,
+                "ratio {ratio}: icon overshoots the top by {top}"
+            );
+        }
+    }
+
+    /// The default proportions must not change: the panel grows only when the
+    /// artwork is set larger than the reference calls for.
+    #[test]
+    fn the_reference_proportions_are_untouched_at_the_default() {
+        let m = Metrics::default();
+        assert!(
+            (m.panel_height() - m.tile_size * m.panel_height_ratio).abs() < 0.5,
+            "panel height drifted from the reference: {}",
+            m.panel_height()
+        );
+    }
+
+    /// Growing the panel is what keeps the margins in proportion, so the space
+    /// above and below should stay in step as the icon grows.
+    #[test]
+    fn the_margins_stay_in_proportion_as_the_icon_grows() {
+        let share = |ratio: f32| {
+            let m = Metrics {
+                icon_size_ratio: ratio,
+                ..Metrics::default()
+            };
+            m.icon_bottom_margin() / m.panel_height()
+        };
+        // Beyond the reference the panel is driven by the icon, so the bottom
+        // margin settles at a fixed share of the height.
+        assert!(
+            (share(0.9) - share(1.0)).abs() < 0.02,
+            "{} vs {}",
+            share(0.9),
+            share(1.0)
+        );
+    }
 
     /// The derived values are what the whole layout hangs off, and they are
     /// easy to break silently when the ratios get recalibrated.
