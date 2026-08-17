@@ -27,16 +27,28 @@ pub fn config_home() -> Option<PathBuf> {
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
-    /// Tile pitch in points -- the macOS Dock size slider.
+    /// Legacy tile pitch in points -- the centre-to-centre spacing of icons.
     ///
-    /// This is the centre-to-centre spacing of icons, not the size of the
-    /// artwork. The two differ on macOS, which is why `icon_size` exists.
+    /// Superseded by `icon_spacing`, which names the quantity people actually
+    /// reason about: the gap between icons. Still honoured when
+    /// `icon_spacing` is unset, so old files keep their geometry.
     pub tile_size: f32,
     /// Size of the icon artwork in points.
     ///
-    /// Independent of the pitch: the gap between icons is `tile_size` minus
-    /// this. Unset follows the reference proportion (0.67 of the pitch).
+    /// Purely horizontal together with `icon_spacing`: growing the icon widens
+    /// the dock but never changes its height, unless the icon outgrows the
+    /// panel entirely. Unset follows the reference proportion.
     pub icon_size: Option<f32>,
+    /// Horizontal gap between icons, in points.
+    ///
+    /// Only spaces the row out -- the panel's height never follows it. Unset
+    /// falls back to whatever `tile_size` leaves once the icon is taken out.
+    pub icon_spacing: Option<f32>,
+    /// Height of the panel, in points. Unset keeps the reference's 85pt.
+    ///
+    /// The panel deliberately holds this height while icons resize inside it;
+    /// it only grows past it when the icon no longer fits.
+    pub panel_height: Option<f32>,
     /// Pitch at full magnification.
     pub large_size: f32,
     pub magnification: bool,
@@ -69,6 +81,8 @@ impl Default for Config {
         Self {
             tile_size: 64.0,
             icon_size: None,
+            icon_spacing: None,
+            panel_height: None,
             large_size: 128.0,
             magnification: true,
             magnification_range: 2.5,
@@ -143,9 +157,26 @@ impl Config {
         })
     }
 
+    /// The icon artwork size in effect: set, or following the reference
+    /// proportion of the legacy pitch.
+    pub fn effective_icon_size(&self) -> f32 {
+        self.icon_size.unwrap_or(self.tile_size * 0.67).max(1.0)
+    }
+
+    /// The gap between icons in effect. Unset falls back to what the legacy
+    /// pitch leaves once the icon is taken out, so old files keep their
+    /// geometry.
+    pub fn effective_icon_spacing(&self) -> f32 {
+        self.icon_spacing
+            .unwrap_or(self.tile_size - self.effective_icon_size())
+            .max(0.0)
+    }
+
     /// Folds the user's preferences into the measured proportions.
     pub fn apply_to(&self, metrics: &mut Metrics) {
-        metrics.tile_size = self.tile_size.max(1.0);
+        // The pitch is derived, not set: the icon plus the gap beside it.
+        let icon = self.effective_icon_size();
+        metrics.tile_size = (icon + self.effective_icon_spacing()).max(1.0);
         metrics.large_size = self.large_size.max(metrics.tile_size);
         metrics.magnification_enabled = self.magnification;
         metrics.magnification_range = self.magnification_range.max(0.0);
@@ -153,8 +184,9 @@ impl Config {
         // Held as a ratio rather than an absolute size because magnification
         // scales the artwork with its slot: the icon is always the same
         // fraction of whatever width the slot currently has.
-        if let Some(size) = self.icon_size {
-            metrics.icon_size_ratio = (size / metrics.tile_size).clamp(0.05, 1.0);
+        metrics.icon_size_ratio = (icon / metrics.tile_size).clamp(0.05, 1.0);
+        if let Some(height) = self.panel_height {
+            metrics.panel_base_height = height.clamp(24.0, 512.0);
         }
         // Past half the height opposite corners would overlap, and the drawing
         // clamps anyway -- rejecting it here keeps the config honest.
@@ -390,6 +422,51 @@ mod tests {
         assert!(m.tile_size >= 1.0);
         assert!(m.large_size >= m.tile_size, "magnification must not invert");
         assert!(m.max_scale() >= 1.0);
+    }
+
+    /// The two Size sliders are purely horizontal: spacing and icon size set
+    /// the pitch between them, and neither moves the panel's height while the
+    /// icon still fits.
+    #[test]
+    fn spacing_and_icon_size_are_purely_horizontal() {
+        let apply = |doc: &str| {
+            let mut m = Metrics::default();
+            Config::parse(doc).unwrap().apply_to(&mut m);
+            m
+        };
+
+        let narrow = apply("icon_size = 37.0\nicon_spacing = 10.0");
+        let wide = apply("icon_size = 37.0\nicon_spacing = 40.0");
+        assert!((narrow.tile_size - 47.0).abs() < 0.01);
+        assert!((wide.tile_size - 77.0).abs() < 0.01);
+        assert_eq!(narrow.panel_height(), wide.panel_height());
+
+        let bigger_icon = apply("icon_size = 60.0\nicon_spacing = 10.0");
+        assert!((bigger_icon.icon_size() - 60.0).abs() < 0.01);
+        assert_eq!(
+            bigger_icon.panel_height(),
+            narrow.panel_height(),
+            "an icon that fits must not change the height"
+        );
+    }
+
+    /// An old file that only knows `tile_size` keeps its geometry.
+    #[test]
+    fn legacy_tile_size_still_sets_the_pitch() {
+        let mut m = Metrics::default();
+        Config::parse("tile_size = 47.0\nicon_size = 37.0")
+            .unwrap()
+            .apply_to(&mut m);
+        assert!((m.tile_size - 47.0).abs() < 0.01);
+        assert!((m.icon_size() - 37.0).abs() < 0.01);
+    }
+
+    /// `panel_height` is the one direct lever over the dock's height.
+    #[test]
+    fn panel_height_sets_the_base() {
+        let mut m = Metrics::default();
+        Config::parse("panel_height = 73.0").unwrap().apply_to(&mut m);
+        assert_eq!(m.panel_height(), 73.0);
     }
 
     #[test]

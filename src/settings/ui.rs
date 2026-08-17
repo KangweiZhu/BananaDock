@@ -23,10 +23,6 @@ pub const TOGGLE_WIDTH: f32 = 40.0;
 pub const TOGGLE_HEIGHT: f32 = 22.0;
 pub const WINDOW_WIDTH: f32 = 460.0;
 
-/// Artwork size as a fraction of the tile pitch, from the reference. Only used
-/// to give the icon-size slider a starting value when the setting is unset.
-const DEFAULT_ICON_RATIO: f32 = 0.67;
-
 /// One line in the window.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Control {
@@ -65,29 +61,23 @@ pub fn controls(config: &Config) -> Vec<Control> {
     vec![
         Control::Heading("Size"),
         Control::Slider {
-            key: "tile_size",
-            // Not the icon's size: the centre-to-centre spacing of the tiles,
-            // which is what macOS's own Dock size slider adjusts.
-            label: "Tile spacing",
-            value: config.tile_size,
-            min: 32.0,
-            max: 96.0,
+            key: "icon_spacing",
+            // The gap between icons, nothing more: it widens the row and
+            // leaves the panel's height alone.
+            label: "Icon spacing",
+            value: config.effective_icon_spacing(),
+            min: 0.0,
+            max: 48.0,
             unit: "pt",
         },
         Control::Slider {
             key: "icon_size",
             label: "Icon size",
-            // Unset follows the reference proportion, so the slider still has
-            // somewhere to start from.
-            value: config
-                .icon_size
-                .unwrap_or(config.tile_size * DEFAULT_ICON_RATIO),
+            value: config.effective_icon_size(),
             min: 16.0,
-            // A fixed range, deliberately not capped at the spacing. The cap
-            // would be honest -- the dock clamps a wider icon anyway -- but
-            // tying `max` to `tile_size` rescales this slider's track whenever
-            // the spacing changes, so dragging the spacing visibly drags this
-            // knob too, which reads as one slider editing the other.
+            // A fixed range, so this track never rescales while another
+            // slider is being dragged -- a `max` tied to the spacing made
+            // dragging the spacing visibly drag this knob too.
             max: 96.0,
             unit: "pt",
         },
@@ -113,6 +103,16 @@ pub fn controls(config: &Config) -> Vec<Control> {
             unit: "tiles",
         },
         Control::Heading("Panel"),
+        Control::Slider {
+            key: "panel_height",
+            label: "Height",
+            // Fixed while icons resize inside it -- the whole point of the
+            // setting -- so icons only force it up when they stop fitting.
+            value: config.panel_height.unwrap_or(85.0),
+            min: 48.0,
+            max: 128.0,
+            unit: "pt",
+        },
         Control::Slider {
             key: "panel_radius",
             label: "Corner radius",
@@ -307,8 +307,8 @@ mod tests {
     /// write and made dragging one slider visibly drag the other's knob.
     #[test]
     fn changing_the_spacing_leaves_the_icon_slider_alone() {
-        let narrow = Config::parse("tile_size = 47.0\nicon_size = 37.0").unwrap();
-        let wide = Config::parse("tile_size = 96.0\nicon_size = 37.0").unwrap();
+        let narrow = Config::parse("icon_spacing = 4.0\nicon_size = 37.0").unwrap();
+        let wide = Config::parse("icon_spacing = 48.0\nicon_size = 37.0").unwrap();
 
         let a = controls(&narrow);
         let b = controls(&wide);
@@ -335,7 +335,7 @@ mod tests {
     fn a_slider_maps_its_track_onto_its_range() {
         let controls = sliders_and_toggles();
         let (tops, _) = rows(&controls);
-        let i = index_of(&controls, "tile_size");
+        let i = index_of(&controls, "icon_size");
         let top = tops[i];
         let y = top + ROW_HEIGHT / 2.0;
         let (tx, _, tw, _) = control_rect(&controls[i], top, WINDOW_WIDTH).unwrap();
@@ -347,22 +347,22 @@ mod tests {
             panic!("no slider hit at the right end")
         };
 
-        assert!((low - 32.0).abs() < 0.01, "got {low}");
+        assert!((low - 16.0).abs() < 0.01, "got {low}");
         assert!((high - 96.0).abs() < 0.01, "got {high}");
     }
 
     /// Dragging past the track must not produce a value outside the range --
-    /// a negative tile size would take the dock down with it.
+    /// a negative icon size would take the dock down with it.
     #[test]
     fn dragging_beyond_the_track_clamps() {
         let controls = sliders_and_toggles();
         let (tops, _) = rows(&controls);
-        let y = tops[index_of(&controls, "tile_size")] + ROW_HEIGHT / 2.0;
+        let y = tops[index_of(&controls, "icon_size")] + ROW_HEIGHT / 2.0;
 
         let Some(Hit::Slider(_, v)) = hit(&controls, WINDOW_WIDTH, -500.0, y) else {
             panic!("no hit")
         };
-        assert!((v - 32.0).abs() < 0.01, "got {v}");
+        assert!((v - 16.0).abs() < 0.01, "got {v}");
 
         let Some(Hit::Slider(_, v)) = hit(&controls, WINDOW_WIDTH, 5000.0, y) else {
             panic!("no hit")

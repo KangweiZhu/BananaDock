@@ -6,14 +6,23 @@
 #
 # The file is re-read the moment it changes -- there is no need to restart.
 
-# Tile pitch in points: the centre-to-centre spacing of icons, which is what
-# macOS's Dock size slider adjusts. The artwork is a fixed fraction of it.
-tile_size = 64.0
-
-# Size of the icon artwork, in points. Independent of the spacing above: the
-# gap between icons is tile_size minus this. Leave it out to follow the
-# reference proportion, which is 0.67 of the spacing.
+# Size of the icon artwork, in points. Purely horizontal: growing it widens
+# the dock but never changes its height, unless the icon outgrows the panel
+# entirely. Leave it out to follow the reference (43pt).
 #icon_size = 43.0
+
+# Horizontal gap between icons, in points. Only spaces the row out -- the
+# panel's height never follows it.
+#icon_spacing = 21.0
+
+# Height of the panel, in points. The panel holds this height while icons
+# resize inside it. Leave it out to follow the reference (85pt).
+#panel_height = 85.0
+
+# Legacy: tile pitch in points, the centre-to-centre spacing of icons.
+# Superseded by icon_spacing; still honoured when icon_spacing is unset, so
+# old files keep their geometry.
+#tile_size = 64.0
 
 # Pitch at full magnification, directly under the pointer.
 large_size = 128.0
