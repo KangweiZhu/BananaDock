@@ -22,6 +22,8 @@ use smithay_client_toolkit::{
         Shm, ShmHandler,
     },
 };
+use std::time::{Duration, Instant};
+
 use tiny_skia::Pixmap;
 use wayland_client::{
     globals::registry_queue_init,
@@ -34,6 +36,11 @@ use super::{
     ui::{self, Control, Hit},
 };
 use crate::{config::Config, text::TextRenderer};
+
+/// Shortest gap between saves while a slider is being dragged. Fast enough to
+/// read as continuous, slow enough not to rewrite the file on every motion
+/// event.
+const WRITE_INTERVAL: Duration = Duration::from_millis(40);
 
 /// Opens the settings window and runs until it is closed.
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -78,6 +85,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         width: size.0,
         height: size.1,
         dragging: None,
+        last_write: Instant::now() - WRITE_INTERVAL,
         hovered: None,
         exit: false,
     };
@@ -106,6 +114,8 @@ struct Settings {
     height: u32,
     /// Index of the slider being dragged, if any.
     dragging: Option<usize>,
+    /// When the config file was last written, for rate-limiting a drag.
+    last_write: Instant,
     hovered: Option<usize>,
     exit: bool,
 }
@@ -124,11 +134,15 @@ impl Settings {
         self.controls = ui::controls(&self.config);
     }
 
-    /// Writes a slider's current value to the file, once the drag has ended.
+    /// Writes a slider's final value when the drag ends.
+    ///
+    /// The rate limit means the last motion before release may not have been
+    /// saved, so this is not redundant with the writes during the drag.
     fn save_slider(&mut self, index: usize) {
         let Some(Control::Slider { key, value, .. }) = self.controls.get(index).cloned() else {
             return;
         };
+        self.last_write = Instant::now();
         self.commit_change(key, (value as f64).into());
     }
 
@@ -141,16 +155,29 @@ impl Settings {
                 self.commit_change(key, (!value).into());
             }
             Hit::Slider(i, raw) => {
-                let Some(Control::Slider { unit, .. }) = self.controls.get(i).cloned() else {
+                let Some(Control::Slider {
+                    key, unit, value, ..
+                }) = self.controls.get(i).cloned()
+                else {
                     return;
                 };
-                // Only the in-memory value moves while the pointer is down. The
-                // file is written once, on release: writing on every motion
-                // event means dozens of saves a second, and the dock re-reads
-                // the file after each one.
                 let next = ui::quantise(raw, unit);
+                if (next - value).abs() < f32::EPSILON {
+                    return;
+                }
                 if let Some(Control::Slider { value, .. }) = self.controls.get_mut(i) {
                     *value = next;
+                }
+
+                // Written as the pointer moves, so the dock changes under the
+                // hand rather than jumping when the drag ends. Rate-limited
+                // because each write is a file rewrite the dock reloads: a
+                // pointer can produce far more motion events per second than
+                // anyone can see.
+                let now = Instant::now();
+                if now.duration_since(self.last_write) >= WRITE_INTERVAL {
+                    self.last_write = now;
+                    self.commit_change(key, (next as f64).into());
                 }
             }
         }
