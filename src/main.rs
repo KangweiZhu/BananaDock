@@ -222,6 +222,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // same session bus the window fallback uses.
         thumbnails: thumbnails::ThumbnailCache::new(zbus::blocking::Connection::session().ok()),
         events: tx.clone(),
+        visible_slots: Vec::new(),
+        departing: Vec::new(),
         minimize_targets_for: (Vec::new(), 0),
         pinned: config.pinned.clone(),
         config,
@@ -602,6 +604,11 @@ struct App {
     thumbnails: thumbnails::ThumbnailCache,
     /// Captures finish on their own threads and report back through here.
     events: channel::Sender<Watched>,
+    /// The row on screen, which lags the target while tiles grow in or shrink
+    /// away.
+    visible_slots: Vec<Slot>,
+    /// Per entry of `visible_slots`: on its way out.
+    departing: Vec<bool>,
     /// Window list and surface width the minimise targets were computed for.
     minimize_targets_for: (Vec<(crate::windows::ToplevelId, bool)>, u32),
     /// Desktop entry ids the user pinned, in order.
@@ -743,7 +750,8 @@ impl App {
         self.draw();
     }
 
-    fn slots(&self) -> Vec<Slot> {
+    /// The row as it should be, ignoring anything still animating out.
+    fn target_slots(&self) -> Vec<Slot> {
         model::build_slots_with(
             &self.pinned,
             self.windows().toplevels(),
@@ -751,6 +759,55 @@ impl App {
             self.config.show_trash.then_some(self.trash),
             self.config.separate_minimized,
         )
+    }
+
+    /// The row actually on screen: the target plus whatever is still shrinking
+    /// away. This is what gets drawn and hit-tested, so indices line up with
+    /// the layout.
+    fn slots(&self) -> Vec<Slot> {
+        self.visible_slots.clone()
+    }
+
+    /// Brings the on-screen row in line with the target.
+    ///
+    /// Widths are carried across by key, not by position: a tile that has just
+    /// appeared starts at nothing so it can grow, and one that is leaving keeps
+    /// the width it had so it can shrink from there. Matching by position
+    /// instead would hand a new tile the width of whatever used to sit at that
+    /// index.
+    fn sync_row(&mut self) {
+        let target = self.target_slots();
+        let merged = model::merge_rows(&self.visible_slots, &target);
+
+        // The very first row has nothing to animate from, and nobody asked the
+        // dock to make an entrance at login: adopt the resting widths whole.
+        let first_row = self.visible_slots.is_empty();
+        let rest = self.slot_metrics(&merged);
+
+        let widths: Vec<f32> = merged
+            .iter()
+            .enumerate()
+            .map(|(i, slot)| {
+                self.visible_slots
+                    .iter()
+                    .position(|s| s.key == slot.key)
+                    .and_then(|j| self.current_widths.get(j).copied())
+                    .unwrap_or(if first_row {
+                        rest.get(i).map_or(0.0, |m| m.rest_width)
+                    } else {
+                        // A tile joining an existing row grows out of nothing,
+                        // parting its neighbours as it goes.
+                        0.0
+                    })
+            })
+            .collect();
+
+        self.departing = merged
+            .iter()
+            .map(|s| model::is_departing(s, &target))
+            .collect();
+        self.visible_slots = merged;
+        self.current_widths = widths;
     }
 
     /// A separator is narrow and holds its width; everything else is a tile
@@ -816,6 +873,7 @@ impl App {
 
     /// Advances the eased widths one frame. Returns whether anything still moves.
     fn step_widths(&mut self, dt_ms: f32) -> bool {
+        self.sync_row();
         let slots = self.slots();
         // Magnification is suppressed mid-drag: the row's job then is to part
         // and show where the icon will land, not to bulge under the pointer.
@@ -824,12 +882,20 @@ impl App {
         } else {
             self.cursor_rest_x
         };
-        let target = layout::layout(&self.slot_metrics(&slots), cursor, &self.metrics);
+        let mut metrics = self.slot_metrics(&slots);
+        // A tile on its way out is heading for no width at all; everything else
+        // parts to make room for it, or closes over the space it leaves.
+        for (m, departing) in metrics.iter_mut().zip(&self.departing) {
+            if *departing {
+                m.rest_width = 0.0;
+                m.magnifies = false;
+            }
+        }
+        let target = layout::layout(&metrics, cursor, &self.metrics);
         let target_widths = target.widths();
 
-        // The row changed length (a window opened or closed); there is nothing
-        // meaningful to ease from, so adopt the new shape outright.
         if self.current_widths.len() != target_widths.len() {
+            // sync_row keeps these aligned; a mismatch would mean a bug there.
             self.current_widths = target_widths;
             return false;
         }
@@ -847,6 +913,22 @@ impl App {
                 moving = true;
             }
         }
+        // A tile that has finished shrinking has nothing left to draw and must
+        // not keep taking up an index, or hit testing would answer with a tile
+        // the user cannot see.
+        let finished: Vec<usize> = self
+            .departing
+            .iter()
+            .enumerate()
+            .filter(|(i, d)| **d && self.current_widths.get(*i).is_some_and(|w| *w < 0.5))
+            .map(|(i, _)| i)
+            .collect();
+        for i in finished.into_iter().rev() {
+            self.visible_slots.remove(i);
+            self.current_widths.remove(i);
+            self.departing.remove(i);
+        }
+
         moving
     }
 
@@ -875,11 +957,9 @@ impl App {
             return;
         };
 
+        self.sync_row();
         let slots = self.slots();
         self.sync_thumbnails(&slots);
-        if self.current_widths.len() != slots.len() {
-            self.step_widths(0.0);
-        }
         let mut geometry = self.geometry();
         for (slot, geom) in slots.iter().zip(&mut geometry.slots) {
             if let Some(started) = self.launching.get(&slot.key) {
@@ -1002,6 +1082,12 @@ impl App {
             return;
         };
         if !slot.is_interactive() {
+            return;
+        }
+        // A tile part-way through shrinking away stands for something that is
+        // already gone; acting on it would target a window that no longer
+        // exists.
+        if self.departing.get(index).copied().unwrap_or(false) {
             return;
         }
 
@@ -2175,9 +2261,12 @@ impl windows::plasma::PlasmaWindowHandler for App {
             .expect("the handler only runs while the protocol is bound")
     }
 
-    fn plasma_windows_changed(&mut self, _: &Connection, _: &QueueHandle<Self>) {
+    fn plasma_windows_changed(&mut self, _: &Connection, qh: &QueueHandle<Self>) {
         self.debug_dump_windows("plasma");
         self.draw();
+        // Tiles grow in and shrink away over several frames, so the row moving
+        // has to start the clock.
+        self.request_frame(qh);
     }
 }
 
@@ -2186,7 +2275,7 @@ impl ForeignToplevelHandler for App {
         &mut self.toplevels
     }
 
-    fn toplevels_changed(&mut self, _: &Connection, _: &QueueHandle<Self>) {
+    fn toplevels_changed(&mut self, _: &Connection, qh: &QueueHandle<Self>) {
         if std::env::var_os("KDOCK_DEBUG").is_some() {
             eprintln!("-- {} toplevel(s)", self.windows().toplevels().len());
             for t in self.windows().toplevels() {
@@ -2197,6 +2286,9 @@ impl ForeignToplevelHandler for App {
             }
         }
         self.draw();
+        // Tiles grow in and shrink away over several frames, so the row moving
+        // has to start the clock.
+        self.request_frame(qh);
     }
 }
 

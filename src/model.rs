@@ -275,6 +275,35 @@ pub struct WindowTarget {
     pub slots: Vec<Slot>,
 }
 
+/// Merges the row that should be on screen with the one that already is.
+///
+/// Tiles are matched by key rather than by position, so the row can be animated
+/// rather than swapped: a tile that has just appeared can grow from nothing,
+/// and one that is leaving stays in the list -- at its old place -- long enough
+/// to shrink away. Without this a window minimising makes every neighbouring
+/// icon jump sideways in a single frame.
+///
+/// Departing tiles keep their old index where it still exists, so they shrink
+/// where they were rather than sliding to the end first.
+pub fn merge_rows(current: &[Slot], target: &[Slot]) -> Vec<Slot> {
+    let mut merged = target.to_vec();
+
+    for (old_index, slot) in current.iter().enumerate() {
+        if target.iter().any(|t| t.key == slot.key) {
+            continue;
+        }
+        let at = old_index.min(merged.len());
+        merged.insert(at, slot.clone());
+    }
+
+    merged
+}
+
+/// Whether a tile in a merged row is on its way out.
+pub fn is_departing(slot: &Slot, target: &[Slot]) -> bool {
+    !target.iter().any(|t| t.key == slot.key)
+}
+
 /// Whether the Trash currently holds anything.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TrashState {
@@ -455,6 +484,80 @@ mod tests {
             slots.iter().map(|s| s.kind).collect::<Vec<_>>(),
             vec![SlotKind::Trash]
         );
+    }
+
+    fn app_slot(key: &str) -> Slot {
+        Slot {
+            kind: SlotKind::App,
+            key: key.to_owned(),
+            label: key.to_owned(),
+            icon_name: None,
+            windows: vec![1],
+            active: false,
+            pinned: false,
+            capture_key: None,
+        }
+    }
+
+    #[test]
+    fn merging_keeps_the_target_row_when_nothing_changed() {
+        let row = vec![app_slot("a"), app_slot("b")];
+        let merged = merge_rows(&row, &row);
+        assert_eq!(merged.len(), 2);
+        assert!(merged.iter().all(|s| !is_departing(s, &row)));
+    }
+
+    /// A tile that is leaving has to stay in the row, or its neighbours snap
+    /// into the gap in a single frame.
+    #[test]
+    fn a_removed_tile_is_kept_so_it_can_shrink_away() {
+        let current = vec![app_slot("a"), app_slot("b"), app_slot("c")];
+        let target = vec![app_slot("a"), app_slot("c")];
+        let merged = merge_rows(&current, &target);
+
+        assert_eq!(
+            merged.iter().map(|s| s.key.as_str()).collect::<Vec<_>>(),
+            vec!["a", "b", "c"],
+            "the departing tile should shrink where it was"
+        );
+        assert!(is_departing(&merged[1], &target));
+        assert!(!is_departing(&merged[0], &target));
+    }
+
+    #[test]
+    fn a_new_tile_is_present_and_not_departing() {
+        let current = vec![app_slot("a")];
+        let target = vec![app_slot("a"), app_slot("new")];
+        let merged = merge_rows(&current, &target);
+
+        assert_eq!(merged.len(), 2);
+        assert!(!is_departing(&merged[1], &target));
+    }
+
+    /// Several tiles can leave at once -- quitting an application with two
+    /// minimised windows, for instance.
+    #[test]
+    fn several_departing_tiles_all_survive_the_merge() {
+        let current = vec![app_slot("a"), app_slot("b"), app_slot("c")];
+        let target = vec![app_slot("b")];
+        let merged = merge_rows(&current, &target);
+
+        assert_eq!(merged.len(), 3);
+        assert_eq!(
+            merged.iter().filter(|s| is_departing(s, &target)).count(),
+            2
+        );
+    }
+
+    /// A tile leaving from the end must not be dropped for want of an index.
+    #[test]
+    fn a_tile_leaving_the_end_is_still_kept() {
+        let current = vec![app_slot("a"), app_slot("b")];
+        let target = vec![app_slot("a")];
+        let merged = merge_rows(&current, &target);
+
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[1].key, "b");
     }
 
     /// The point of the whole exercise: a window still on screen is told where
