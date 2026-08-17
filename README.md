@@ -120,6 +120,13 @@ install -Dm644 dist/kdock.service ~/.config/systemd/user/kdock.service
 systemctl --user enable --now kdock.service
 ```
 
+The unit uses `Restart=always` rather than `on-failure` on purpose: the dock
+exits *zero* when the compositor goes away, so `on-failure` would leave it gone
+for the rest of the session after every compositor restart.
+
+```sh
+```
+
 ## Configuration
 
 `~/.config/kdock/config.toml`, re-read the moment it changes — no restart. See

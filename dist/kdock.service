@@ -7,10 +7,21 @@ After=graphical-session.target
 # connect to.
 Requisite=graphical-session.target
 
+# A compositor restart takes the dock down with it and then refuses connections
+# for a while, so the retries below have to outlast that. Generous, but still
+# bounded: a genuinely broken install gives up instead of respawning forever.
+StartLimitIntervalSec=300
+StartLimitBurst=30
+
 [Service]
 Type=simple
 ExecStart=%h/.local/bin/kdock
-Restart=on-failure
+# Not on-failure. Losing the compositor is an orderly shutdown -- the dock exits
+# zero -- so on-failure would leave the dock gone for the rest of the session
+# after every compositor restart, with nothing in the log to say why.
+#
+# An explicit `systemctl --user stop` still stops it: that overrides Restart.
+Restart=always
 # A compositor that has not finished starting refuses connections; back off
 # rather than spinning through restarts.
 RestartSec=2
