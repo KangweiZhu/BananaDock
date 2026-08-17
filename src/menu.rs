@@ -215,7 +215,12 @@ mod tests {
     /// for something with nothing to hide or quit.
     #[test]
     fn a_dormant_launcher_gets_only_pinning_and_open() {
-        let items = build_menu(&slot(SlotKind::App, vec![]), &[], true, Capabilities::default());
+        let items = build_menu(
+            &slot(SlotKind::App, vec![]),
+            &[],
+            true,
+            Capabilities::default(),
+        );
         assert_eq!(labels(&items), vec!["Keep in Dock", "Open"]);
         assert!(items[0].checked);
     }
@@ -223,7 +228,12 @@ mod tests {
     #[test]
     fn a_running_app_lists_its_windows_first() {
         let tops = vec![toplevel(1, "Doc one"), toplevel(2, "Doc two")];
-        let items = build_menu(&slot(SlotKind::App, vec![1, 2]), &tops, false, Capabilities::default());
+        let items = build_menu(
+            &slot(SlotKind::App, vec![1, 2]),
+            &tops,
+            false,
+            Capabilities::default(),
+        );
 
         assert_eq!(labels(&items)[0..2], ["Doc one", "Doc two"]);
         assert!(items[2].is_separator());
@@ -234,7 +244,12 @@ mod tests {
     #[test]
     fn choosing_a_window_targets_that_exact_window() {
         let tops = vec![toplevel(7, "Only")];
-        let items = build_menu(&slot(SlotKind::App, vec![7]), &tops, false, Capabilities::default());
+        let items = build_menu(
+            &slot(SlotKind::App, vec![7]),
+            &tops,
+            false,
+            Capabilities::default(),
+        );
         assert_eq!(items[0].action, Some(MenuAction::ActivateWindow(7)));
     }
 
@@ -242,7 +257,12 @@ mod tests {
     #[test]
     fn an_untitled_window_falls_back_to_the_application_name() {
         let tops = vec![toplevel(1, "")];
-        let items = build_menu(&slot(SlotKind::App, vec![1]), &tops, false, Capabilities::default());
+        let items = build_menu(
+            &slot(SlotKind::App, vec![1]),
+            &tops,
+            false,
+            Capabilities::default(),
+        );
         assert_eq!(items[0].label, "App");
     }
 
@@ -255,7 +275,12 @@ mod tests {
             minimize: false,
             close: false,
         };
-        let items = build_menu(&slot(SlotKind::App, vec![1]), &[toplevel(1, "Live")], true, caps);
+        let items = build_menu(
+            &slot(SlotKind::App, vec![1]),
+            &[toplevel(1, "Live")],
+            true,
+            caps,
+        );
         let labels = labels(&items);
 
         assert!(!labels.contains(&"Hide"), "{labels:?}");
@@ -292,7 +317,12 @@ mod tests {
 
     #[test]
     fn no_leading_separator_when_nothing_is_running() {
-        let items = build_menu(&slot(SlotKind::App, vec![]), &[], false, Capabilities::default());
+        let items = build_menu(
+            &slot(SlotKind::App, vec![]),
+            &[],
+            false,
+            Capabilities::default(),
+        );
         assert!(
             !items[0].is_separator(),
             "a menu must not start with a divider"
@@ -301,7 +331,12 @@ mod tests {
 
     #[test]
     fn the_trash_gets_its_own_short_menu() {
-        let items = build_menu(&slot(SlotKind::Trash, vec![]), &[], true, Capabilities::default());
+        let items = build_menu(
+            &slot(SlotKind::Trash, vec![]),
+            &[],
+            true,
+            Capabilities::default(),
+        );
         assert_eq!(labels(&items), vec!["Open"]);
         assert_eq!(items[0].action, Some(MenuAction::OpenTrash));
     }
@@ -376,7 +411,12 @@ mod tests {
     #[test]
     fn separators_carry_no_action() {
         let tops = vec![toplevel(1, "W")];
-        let items = build_menu(&slot(SlotKind::App, vec![1]), &tops, false, Capabilities::default());
+        let items = build_menu(
+            &slot(SlotKind::App, vec![1]),
+            &tops,
+            false,
+            Capabilities::default(),
+        );
         for item in items.iter().filter(|i| i.is_separator()) {
             assert!(item.action.is_none());
         }
