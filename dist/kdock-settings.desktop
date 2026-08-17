@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=kdock Settings
+GenericName=Dock Settings
+Comment=Configure the kdock dock
+# Rewritten by the install step to the absolute path of the installed binary.
+Exec=/usr/bin/kdock --settings
+Icon=configure
+Terminal=false
+Categories=Settings;DesktopSettings;

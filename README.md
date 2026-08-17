@@ -129,6 +129,19 @@ for the rest of the session after every compositor restart.
 
 ## Configuration
 
+A settings window covers the common options:
+
+```sh
+kdock --settings
+```
+
+It writes straight to the configuration file below -- there is no separate
+store and nothing to apply. The dock is already watching that file, so a change
+takes effect as it is made. Options the window does not cover (the icon theme,
+which output to sit on, the pinned list) are edited in the file, or in the dock
+itself by dragging.
+
+
 `~/.config/kdock/config.toml`, re-read the moment it changes — no restart. See
 [dist/config.example.toml](dist/config.example.toml) for every setting with its
 default.

@@ -103,34 +103,23 @@ impl Config {
     /// default they had deliberately left out. `toml_edit` preserves the
     /// document, so only the one array the dock owns actually changes.
     pub fn save_pinned(path: &Path, pinned: &[String]) -> std::io::Result<()> {
-        let existing = match std::fs::read_to_string(path) {
-            Ok(t) => t,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
-            Err(e) => return Err(e),
-        };
-
-        let mut doc = existing.parse::<toml_edit::DocumentMut>().map_err(|e| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("{} is not valid TOML: {e}", path.display()),
-            )
-        })?;
-
         let mut array = toml_edit::Array::new();
         for id in pinned {
             array.push(id.as_str());
         }
-        doc["pinned"] = toml_edit::value(array);
+        edit(path, |doc| set_value(doc, "pinned", array.into()))
+    }
 
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        // Written through a temporary file and renamed: a crash midway would
-        // otherwise leave a truncated config, and the dock reads this file on
-        // every change notification.
-        let tmp = path.with_extension("toml.tmp");
-        std::fs::write(&tmp, doc.to_string())?;
-        std::fs::rename(&tmp, path)
+    /// Writes a set of scalar settings, leaving the rest of the file alone.
+    pub fn save_settings(
+        path: &Path,
+        settings: &[(&str, toml_edit::Value)],
+    ) -> std::io::Result<()> {
+        edit(path, |doc| {
+            for (key, value) in settings {
+                set_value(doc, key, value.clone());
+            }
+        })
     }
 
     /// Folds the user's preferences into the measured proportions.
@@ -142,9 +131,96 @@ impl Config {
     }
 }
 
+/// Replaces a value while keeping whatever was written around it.
+///
+/// Assigning through `doc[key]` would drop the value's decor, and the decor is
+/// where a trailing `# comment` lives -- so editing one setting from the
+/// settings window would quietly delete the note the user left beside it.
+fn set_value(doc: &mut toml_edit::DocumentMut, key: &str, value: toml_edit::Value) {
+    match doc.get_mut(key).and_then(|item| item.as_value_mut()) {
+        Some(existing) => {
+            let decor = existing.decor().clone();
+            *existing = value;
+            *existing.decor_mut() = decor;
+        }
+        None => doc[key] = toml_edit::Item::Value(value),
+    }
+}
+
+/// Reads, edits and writes the config file in place.
+///
+/// A missing file is treated as an empty one, so the first save works without
+/// the user having created anything.
+fn edit(path: &Path, apply: impl FnOnce(&mut toml_edit::DocumentMut)) -> std::io::Result<()> {
+    let existing = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e),
+    };
+
+    let mut doc = existing.parse::<toml_edit::DocumentMut>().map_err(|e| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("{} is not valid TOML: {e}", path.display()),
+        )
+    })?;
+    apply(&mut doc);
+
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    // Written through a temporary file and renamed: a crash midway would
+    // otherwise leave a truncated config, and the dock re-reads this file on
+    // every change notification.
+    let tmp = path.with_extension("toml.tmp");
+    std::fs::write(&tmp, doc.to_string())?;
+    std::fs::rename(&tmp, path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Editing a setting must not eat the note the user left beside it.
+    #[test]
+    fn writing_a_value_keeps_the_comments_around_it() {
+        let src = "# top\n\n# what this does\ntile_size = 64.0\n\nauto_hide = false # beside\n";
+        let mut doc: toml_edit::DocumentMut = src.parse().unwrap();
+
+        set_value(&mut doc, "tile_size", 80.0.into());
+        set_value(&mut doc, "auto_hide", true.into());
+        let out = doc.to_string();
+
+        assert!(out.contains("# top"));
+        assert!(out.contains("# what this does"));
+        assert!(out.contains("# beside"), "trailing comment lost:\n{out}");
+        assert!(out.contains("tile_size = 80.0"));
+        assert!(out.contains("auto_hide = true"));
+    }
+
+    /// A setting the file does not mention yet is appended, not dropped.
+    #[test]
+    fn a_missing_key_is_added() {
+        let mut doc: toml_edit::DocumentMut = "tile_size = 64.0\n".parse().unwrap();
+        set_value(&mut doc, "separate_minimized", false.into());
+
+        let out = doc.to_string();
+        assert!(out.contains("separate_minimized = false"), "{out}");
+        assert!(out.contains("tile_size = 64.0"));
+    }
+
+    /// Round-trip: what the settings window writes has to be what the dock
+    /// then parses back.
+    #[test]
+    fn written_values_survive_a_reparse() {
+        let mut doc: toml_edit::DocumentMut = "# note\ntile_size = 64.0\n".parse().unwrap();
+        set_value(&mut doc, "tile_size", 96.0.into());
+        set_value(&mut doc, "magnification", false.into());
+
+        let parsed = Config::parse(&doc.to_string()).expect("still valid TOML");
+        assert_eq!(parsed.tile_size, 96.0);
+        assert!(!parsed.magnification);
+    }
 
     #[test]
     fn an_empty_file_is_all_defaults() {

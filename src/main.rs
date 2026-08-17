@@ -9,6 +9,7 @@ mod menu;
 mod metrics;
 mod model;
 mod render;
+mod settings;
 mod shell;
 mod text;
 mod thumbnails;
@@ -85,6 +86,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // the way to see the panel at all when a fullscreen window covers it.
     let mut args = std::env::args().skip(1);
     if let Some(flag) = args.next() {
+        if flag == "--settings" {
+            return settings::run();
+        }
         if flag == "--dump-frame" {
             let path = args.next().ok_or("--dump-frame needs an output path")?;
             let width: u32 = args.next().map_or(Ok(1920), |v| v.parse())?;
