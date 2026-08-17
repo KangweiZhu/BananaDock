@@ -21,6 +21,13 @@ const KNOB: Color = Color::rgba(1.0, 1.0, 1.0, 0.95);
 const LABEL_SIZE: f32 = 13.0;
 const HEADING_SIZE: f32 = 11.0;
 
+/// `TextRenderer::draw` places the *top of the line box*, not a baseline, so
+/// centring text in a row means subtracting half a line height rather than
+/// nudging a baseline down. Same factor the dock's own menu uses.
+fn line_top(row_top: f32, row_height: f32, px: f32) -> f32 {
+    row_top + row_height / 2.0 - px * 1.25 / 2.0
+}
+
 pub fn draw(
     pixmap: &mut Pixmap,
     text: &mut TextRenderer,
@@ -36,13 +43,16 @@ pub fn draw(
             Control::Heading(title) => {
                 // Sits low in its taller row, so it reads as a lid on what
                 // follows rather than as another setting.
-                let baseline = top + ui::HEADING_HEIGHT - 14.0;
                 text.draw(
                     pixmap,
                     &title.to_uppercase(),
                     HEADING_SIZE,
                     ui::PADDING,
-                    baseline,
+                    line_top(
+                        top + ui::HEADING_HEIGHT / 2.0,
+                        ui::HEADING_HEIGHT / 2.0,
+                        HEADING_SIZE,
+                    ),
                     HEADING,
                 );
             }
@@ -84,7 +94,7 @@ pub fn draw(
                         &shown,
                         LABEL_SIZE,
                         rect.0 - w - 12.0,
-                        top + ui::ROW_HEIGHT / 2.0 + 4.0,
+                        line_top(*top, ui::ROW_HEIGHT, LABEL_SIZE),
                         VALUE,
                     );
                 }
@@ -99,7 +109,7 @@ fn label_at(pixmap: &mut Pixmap, text: &mut TextRenderer, label: &str, top: f32)
         label,
         LABEL_SIZE,
         ui::PADDING,
-        top + ui::ROW_HEIGHT / 2.0 + 4.0,
+        line_top(top, ui::ROW_HEIGHT, LABEL_SIZE),
         LABEL,
     );
 }
@@ -200,6 +210,38 @@ mod tests {
                     "something is drawn at x={x}, inside the right margin"
                 );
             }
+        }
+    }
+
+    /// The label has to sit level with the control it belongs to. `draw` takes
+    /// the top of the line box rather than a baseline, and treating it as a
+    /// baseline puts every label about half a line low -- visible, but easy to
+    /// stare past.
+    #[test]
+    fn labels_are_vertically_centred_in_their_rows() {
+        let pixmap = render();
+        let controls = ui::controls(&Config::default());
+        let (tops, _) = ui::rows(&controls);
+
+        for (control, top) in controls.iter().zip(&tops) {
+            if !matches!(control, Control::Toggle { .. } | Control::Slider { .. }) {
+                continue;
+            }
+            // Ink in the label column only, so the control on the right cannot
+            // stand in for a label that is not there.
+            let rows: Vec<u32> = ((*top as u32)..((top + control.height()) as u32))
+                .filter(|y| {
+                    (ui::PADDING as u32..200).any(|x| !is_background(pixmap.pixel(x, *y).unwrap()))
+                })
+                .collect();
+
+            let (first, last) = (rows[0] as f32, *rows.last().unwrap() as f32);
+            let ink_centre = (first + last) / 2.0;
+            let row_centre = top + control.height() / 2.0;
+            assert!(
+                (ink_centre - row_centre).abs() < 4.0,
+                "label ink centred at {ink_centre}, row centre is {row_centre}"
+            );
         }
     }
 

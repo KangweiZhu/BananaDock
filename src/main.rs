@@ -781,6 +781,21 @@ impl App {
         self.visible_slots.clone()
     }
 
+    /// Throws away the animation state so the next sync rebuilds the row from
+    /// scratch.
+    ///
+    /// All four have to go together. `sync_row` carries widths across by
+    /// looking each slot up in the *previous* row, so clearing the widths but
+    /// leaving the slots behind hands every tile a width of zero -- and with
+    /// nothing asking for a frame, they stay there. The dock renders as an
+    /// empty capsule with every icon gone.
+    fn reset_row(&mut self) {
+        self.visible_slots.clear();
+        self.departing.clear();
+        self.entering.clear();
+        self.current_widths.clear();
+    }
+
     /// Brings the on-screen row in line with the target.
     ///
     /// Widths are carried across by key, not by position: a tile that has just
@@ -1128,7 +1143,7 @@ impl App {
             self.dock.height = new_height;
         }
         // Slot count or sizes may both have moved; re-derive rather than ease.
-        self.current_widths.clear();
+        self.reset_row();
         self.draw();
     }
 
@@ -1426,7 +1441,7 @@ impl App {
                     self.pinned.push(slot.key.clone());
                 }
                 self.save_pinned();
-                self.current_widths.clear();
+                self.reset_row();
                 self.draw();
             }
         }
@@ -1713,7 +1728,7 @@ impl App {
                 }
                 if added {
                     self.save_pinned();
-                    self.current_widths.clear();
+                    self.reset_row();
                 }
             }
         }
@@ -1749,7 +1764,7 @@ impl App {
         // Only pinned entries have a stored order; dragging a window-only tile
         // has nothing to write back.
         let Some(from) = self.pinned.iter().position(|p| *p == drag.key) else {
-            self.current_widths.clear();
+            self.reset_row();
             self.draw();
             return;
         };
@@ -1775,7 +1790,7 @@ impl App {
         }
 
         self.save_pinned();
-        self.current_widths.clear();
+        self.reset_row();
         self.draw();
     }
 
