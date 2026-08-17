@@ -25,6 +25,11 @@ auto_hide = false
 
 show_trash = true
 
+# Whether a minimised window gets its own tile to the right of the applications,
+# as macOS does. Set to false for macOS's "Minimize windows into application
+# icon" behaviour, where a minimised window only shows through its app's icon.
+separate_minimized = true
+
 # Icon theme name. Unset follows the desktop's own setting, read from KDE's or
 # GTK's configuration.
 # icon_theme = "breeze"

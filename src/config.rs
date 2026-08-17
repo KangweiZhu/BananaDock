@@ -33,6 +33,10 @@ pub struct Config {
     pub magnification_range: f32,
     pub auto_hide: bool,
     pub show_trash: bool,
+    /// Whether a minimised window gets its own tile to the right of the
+    /// applications, as macOS does by default, or only shows through its
+    /// application's icon -- macOS's "Minimize windows into application icon".
+    pub separate_minimized: bool,
     /// Overrides the icon theme detected from the desktop's own settings.
     pub icon_theme: Option<String>,
     /// Which screen to sit on, by connector name (`DP-1`, `eDP-1`, ...).
@@ -51,6 +55,7 @@ impl Default for Config {
             magnification_range: 2.5,
             auto_hide: false,
             show_trash: true,
+            separate_minimized: true,
             icon_theme: None,
             output: None,
             pinned: Vec::new(),

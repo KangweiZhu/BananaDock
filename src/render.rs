@@ -237,7 +237,9 @@ pub fn draw_dock(
             }
         }
 
-        if slot.is_running() {
+        // The dot marks a running *application*. A minimised window's own tile
+        // is not an application, and macOS gives it no dot.
+        if slot.kind == SlotKind::App && slot.is_running() {
             draw_dot(pixmap, t, metrics, palette, centre_x, dot_row);
         }
     }
@@ -538,13 +540,16 @@ mod tests {
     /// slot. The dot is small and easy to knock out of the panel entirely by a
     /// sign error in the vertical maths, which no compile check would catch.
     /// Renders one slot and returns the pixmap plus the panel rectangle.
-    fn render_one(running: bool, scale: f32) -> (Pixmap, Rect, Metrics) {
+    fn render_one_kind(kind: SlotKind, running: bool, scale: f32) -> (Pixmap, Rect, Metrics) {
         let m = Metrics::default();
         let (lw, lh) = (400.0, m.surface_height());
         let mut pixmap = Pixmap::new((lw * scale) as u32, (lh * scale).ceil() as u32).unwrap();
         let mut icons = IconCache::default();
 
-        let slots = [slot(running)];
+        let slots = [Slot {
+            kind,
+            ..slot(running)
+        }];
         let geom = crate::layout::layout(
             &[crate::layout::SlotMetrics {
                 rest_width: m.pt(m.tile_size),
@@ -568,6 +573,35 @@ mod tests {
             None,
         );
         (pixmap, panel, m)
+    }
+
+    fn render_one(running: bool, scale: f32) -> (Pixmap, Rect, Metrics) {
+        render_one_kind(SlotKind::App, running, scale)
+    }
+
+    fn dot_alpha_for(kind: SlotKind) -> u8 {
+        let (pixmap, panel, m) = render_one_kind(kind, true, 1.0);
+        let cx = (panel.x() + m.pt(m.panel_padding_h) + m.pt(m.tile_size) / 2.0) as u32;
+        let cy = (panel.bottom() - m.pt(m.dot_bottom_margin)) as u32;
+        pixmap.pixel(cx, cy).unwrap().alpha()
+    }
+
+    /// The dot means "this application is running". A minimised window's own
+    /// tile is a window, not an application, and macOS gives it no dot -- so
+    /// carrying a window id must not be enough to earn one.
+    #[test]
+    fn only_application_tiles_get_a_running_dot() {
+        let app = dot_alpha_for(SlotKind::App);
+        let minimized = dot_alpha_for(SlotKind::MinimizedWindow);
+
+        assert!(
+            app > 180,
+            "an application tile should show its dot, got {app}"
+        );
+        assert!(
+            minimized < app,
+            "a minimised tile must not, got {minimized} vs {app}"
+        );
     }
 
     fn dot_centre_alpha(running: bool) -> u8 {

@@ -694,11 +694,12 @@ impl App {
     }
 
     fn slots(&self) -> Vec<Slot> {
-        model::build_slots(
+        model::build_slots_with(
             &self.pinned,
             self.windows().toplevels(),
             &self.launchers,
             self.config.show_trash.then_some(self.trash),
+            self.config.separate_minimized,
         )
     }
 
@@ -1449,6 +1450,15 @@ impl App {
 
         if slot.kind == SlotKind::Trash {
             open_trash();
+            return;
+        }
+
+        // A minimised tile stands for one window, so it restores exactly that
+        // one rather than the whole application.
+        if slot.kind == SlotKind::MinimizedWindow {
+            for &id in &slot.windows {
+                self.windows().activate(id);
+            }
             return;
         }
 

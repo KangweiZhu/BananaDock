@@ -21,6 +21,10 @@ pub enum SlotKind {
     #[default]
     App,
     Separator,
+    /// A single minimised window, shown on its own to the right of the
+    /// applications. macOS does this rather than folding the window into its
+    /// application's icon, so a minimised window stays individually reachable.
+    MinimizedWindow,
     Trash,
 }
 
@@ -60,6 +64,19 @@ pub fn build_slots(
     toplevels: &[Toplevel],
     index: &LauncherIndex,
     trash: Option<TrashState>,
+) -> Vec<Slot> {
+    build_slots_with(pinned, toplevels, index, trash, true)
+}
+
+/// `separate_minimized` mirrors macOS's "Minimize windows into application
+/// icon" setting: with it off (the default there, and here) a minimised window
+/// gets its own tile; with it on it only shows through its application's icon.
+pub fn build_slots_with(
+    pinned: &[String],
+    toplevels: &[Toplevel],
+    index: &LauncherIndex,
+    trash: Option<TrashState>,
+    separate_minimized: bool,
 ) -> Vec<Slot> {
     let mut slots: Vec<Slot> = pinned
         .iter()
@@ -114,21 +131,35 @@ pub fn build_slots(
         }
     }
 
-    // The Trash goes last, behind a separator -- and only a separator when
-    // there is actually something to separate it from.
-    if let Some(trash) = trash {
-        if !slots.is_empty() {
-            slots.push(Slot {
-                kind: SlotKind::Separator,
-                key: "\u{1}separator".to_owned(),
-                label: String::new(),
-                icon_name: None,
-                windows: Vec::new(),
+    let app_count = slots.len();
+
+    // Everything past the separator: minimised windows first, then the Trash.
+    let mut tail: Vec<Slot> = Vec::new();
+
+    if separate_minimized {
+        for t in toplevels.iter().filter(|t| t.minimized) {
+            let matched = index.match_app_id(&t.app_id);
+            tail.push(Slot {
+                kind: SlotKind::MinimizedWindow,
+                // Keyed by window, not by application: two minimised windows of
+                // one application are two tiles.
+                key: format!("\u{1}min:{}", t.id),
+                // The window's own title, which is what distinguishes them.
+                label: if t.title.is_empty() {
+                    matched.map_or_else(|| t.app_id.clone(), |l| l.name.clone())
+                } else {
+                    t.title.clone()
+                },
+                icon_name: matched.and_then(|l| l.icon.clone()),
+                windows: vec![t.id],
                 active: false,
-                pinned: true,
+                pinned: false,
             });
         }
-        slots.push(Slot {
+    }
+
+    if let Some(trash) = trash {
+        tail.push(Slot {
             kind: SlotKind::Trash,
             key: "\u{1}trash".to_owned(),
             label: "Trash".to_owned(),
@@ -145,6 +176,20 @@ pub fn build_slots(
             pinned: true,
         });
     }
+
+    // A separator only earns its place when it has something on both sides.
+    if !tail.is_empty() && app_count > 0 {
+        slots.push(Slot {
+            kind: SlotKind::Separator,
+            key: "\u{1}separator".to_owned(),
+            label: String::new(),
+            icon_name: None,
+            windows: Vec::new(),
+            active: false,
+            pinned: true,
+        });
+    }
+    slots.extend(tail);
 
     slots
 }
@@ -214,6 +259,121 @@ mod tests {
         assert_eq!(slots.len(), 1);
         assert!(slots[0].pinned);
         assert!(!slots[0].is_running());
+    }
+
+    fn minimized(id: ToplevelId, app_id: &str, title: &str) -> Toplevel {
+        Toplevel {
+            id,
+            app_id: app_id.to_owned(),
+            title: title.to_owned(),
+            minimized: true,
+            ..Default::default()
+        }
+    }
+
+    /// The macOS layout: applications, separator, minimised windows, Trash.
+    #[test]
+    fn minimized_windows_sit_between_the_separator_and_the_trash() {
+        let tops = vec![minimized(1, "myapp", "Doc")];
+        let slots = build_slots(
+            &[],
+            &tops,
+            &LauncherIndex::default(),
+            Some(TrashState { full: false }),
+        );
+
+        let kinds: Vec<_> = slots.iter().map(|s| s.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                SlotKind::App,
+                SlotKind::Separator,
+                SlotKind::MinimizedWindow,
+                SlotKind::Trash
+            ]
+        );
+    }
+
+    /// A minimised window keeps its application's tile too -- the app is still
+    /// running, so its icon and running dot stay put.
+    #[test]
+    fn a_minimized_window_does_not_remove_its_application_tile() {
+        let tops = vec![minimized(1, "myapp", "Doc")];
+        let slots = build_slots(&[], &tops, &LauncherIndex::default(), None);
+
+        assert_eq!(slots[0].kind, SlotKind::App);
+        assert!(slots[0].is_running());
+        // The separator divides the two regions, so the tile is not at index 1.
+        assert!(slots.iter().any(|s| s.kind == SlotKind::MinimizedWindow));
+    }
+
+    /// Two minimised windows of one application are two tiles, unlike the
+    /// application tiles themselves which merge.
+    #[test]
+    fn minimized_windows_are_per_window_not_per_application() {
+        let tops = vec![minimized(1, "myapp", "One"), minimized(2, "myapp", "Two")];
+        let slots = build_slots(&[], &tops, &LauncherIndex::default(), None);
+
+        let mins: Vec<_> = slots
+            .iter()
+            .filter(|s| s.kind == SlotKind::MinimizedWindow)
+            .collect();
+        assert_eq!(mins.len(), 2);
+        assert_eq!(mins[0].label, "One");
+        assert_eq!(mins[1].label, "Two");
+        assert_ne!(mins[0].key, mins[1].key);
+    }
+
+    /// Each tile has to target its own window, or clicking one would restore
+    /// the wrong one.
+    #[test]
+    fn a_minimized_tile_targets_exactly_its_window() {
+        let tops = vec![minimized(7, "myapp", "Doc")];
+        let slots = build_slots(&[], &tops, &LauncherIndex::default(), None);
+        let tile = slots
+            .iter()
+            .find(|s| s.kind == SlotKind::MinimizedWindow)
+            .unwrap();
+
+        assert_eq!(tile.windows, vec![7]);
+    }
+
+    /// A window with no title still needs something readable on its tile.
+    #[test]
+    fn an_untitled_minimized_window_falls_back_to_the_app_name() {
+        let tops = vec![minimized(1, "myapp", "")];
+        let slots = build_slots(&[], &tops, &LauncherIndex::default(), None);
+        let tile = slots
+            .iter()
+            .find(|s| s.kind == SlotKind::MinimizedWindow)
+            .unwrap();
+
+        assert_eq!(tile.label, "myapp");
+    }
+
+    /// The macOS "minimize into application icon" setting.
+    #[test]
+    fn folding_into_the_app_icon_drops_the_separate_tiles() {
+        let tops = vec![minimized(1, "myapp", "Doc")];
+        let slots = build_slots_with(&[], &tops, &LauncherIndex::default(), None, false);
+
+        assert!(slots.iter().all(|s| s.kind != SlotKind::MinimizedWindow));
+        assert!(slots[0].is_running(), "the app tile still shows it running");
+    }
+
+    /// Nothing to separate means no separator: a lone Trash must not get one.
+    #[test]
+    fn a_separator_needs_something_on_both_sides() {
+        let slots = build_slots(
+            &[],
+            &[],
+            &LauncherIndex::default(),
+            Some(TrashState { full: false }),
+        );
+        assert_eq!(
+            slots.iter().map(|s| s.kind).collect::<Vec<_>>(),
+            vec![SlotKind::Trash]
+        );
     }
 
     #[test]
