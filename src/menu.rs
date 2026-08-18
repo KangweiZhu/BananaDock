@@ -200,7 +200,12 @@ pub fn layout_menu(
         .filter(|i| !i.is_separator())
         .map(|i| measure_text(&i.label))
         .fold(0.0, f32::max);
-    let width = (widest + pad * 2.0 + check_column).max(metrics.pt(metrics.menu_min_width));
+    // Clamped at both ends: a menu narrower than the minimum looks accidental,
+    // and one wider than the maximum has been handed a window title. The
+    // drawing cuts labels to fit whatever comes out of this.
+    let width = (widest + pad * 2.0 + check_column)
+        .max(metrics.pt(metrics.menu_min_width))
+        .min(metrics.pt(metrics.menu_max_width));
 
     let mut rows = Vec::with_capacity(items.len());
     let mut y = pad / 2.0;
@@ -464,8 +469,22 @@ mod tests {
         );
 
         let items = vec![MenuItem::action("x", MenuAction::Open)];
-        let long = layout_menu(&items, &m, |_| 900.0);
-        assert!(long.width > 900.0, "a long label must fit with padding");
+        let long = layout_menu(&items, &m, |_| 240.0);
+        assert!(long.width > 240.0, "a long label must fit with padding");
+    }
+
+    /// A window's title can be as long as the page it came from, and a menu
+    /// sized to fit one runs past the edge of the screen. The row is there to
+    /// tell one window from another, which the first few words do.
+    #[test]
+    fn a_title_too_long_to_fit_stops_at_the_maximum() {
+        let m = crate::metrics::Metrics::default();
+        let items = vec![MenuItem::action("x", MenuAction::Open)];
+
+        let huge = layout_menu(&items, &m, |_| 4000.0);
+        assert_eq!(huge.width, m.pt(m.menu_max_width));
+        // ...and the ceiling has to leave room for the minimum to matter.
+        assert!(m.menu_max_width > m.menu_min_width);
     }
 
     #[test]

@@ -127,6 +127,13 @@ pub struct Metrics {
     pub menu_item_padding: f32,
     pub menu_font_size: f32,
     pub menu_min_width: f32,
+    /// Widest a menu may get before its labels are cut short.
+    ///
+    /// A menu row can carry a window's title, and a title is as long as the
+    /// page it came from -- a browser tab alone will run a menu past the width
+    /// of the screen. The point of the row is to tell one window from another,
+    /// which the first few words do.
+    pub menu_max_width: f32,
     /// Inset of the highlight from the menu's edges.
     pub menu_highlight_inset: f32,
     pub menu_highlight_radius: f32,
@@ -191,6 +198,7 @@ impl Default for Metrics {
             menu_item_padding: 12.0,    // [measure]
             menu_font_size: 13.0,       // [measure]
             menu_min_width: 200.0,      // [measure]
+            menu_max_width: 360.0,      // [measure]
             menu_highlight_inset: 4.0,  // [measure]
             menu_highlight_radius: 5.0, // [measure]
             menu_separator_height: 9.0, // [measure]

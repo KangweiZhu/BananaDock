@@ -605,9 +605,16 @@ pub fn draw_menu(
                 colour,
             );
         }
+        // The label has to fit what the layout settled on, which for a long
+        // window title is the maximum rather than the text's own width. Both
+        // sides of that comparison are in device pixels: `font_px` already
+        // carries the output's scale, and measuring against a logical width
+        // would cut the text short by exactly that factor.
+        let room = (logical.0 - pad * 3.0) * scale;
+        let label = elide(text, &item.label, font_px, room);
         text.draw(
             pixmap,
-            &item.label,
+            &label,
             font_px,
             (pad * 2.0) * scale,
             baseline_top,
@@ -1010,7 +1017,14 @@ mod tests {
             art.fill(tiny_skia::Color::from_rgba8(255, 0, 0, 255));
             art.save_png(&icon_path).unwrap();
 
-            let m = Metrics::default();
+            // The grace is wall-clock, and this test is about the branch
+            // rather than the deadline (which thumbnails.rs tests on its own).
+            // Left at the real 220ms it fails whenever the suite is loaded
+            // enough for that long to pass before the frame is drawn.
+            let m = Metrics {
+                row_change_ms: 60_000,
+                ..Metrics::default()
+            };
             let (lw, lh) = (400.0, m.surface_depth());
             let mut pixmap = Pixmap::new(lw as u32, lh.ceil() as u32).unwrap();
             let mut icons = IconCache::default();
@@ -1374,6 +1388,56 @@ mod tests {
                 "scale {scale}: the chip is empty -- {glyphs} lit pixels of text"
             );
         }
+    }
+
+    /// A window title can be longer than any menu, so the row is cut to fit --
+    /// and the cut has to use the whole width the layout reserved. `font_px`
+    /// carries the output's scale while the layout's width does not, so
+    /// measuring one against the other cuts the text short by exactly that
+    /// factor: right at scale 1, half a menu's worth of text missing at 2.
+    #[test]
+    fn a_long_menu_row_is_cut_to_the_width_the_layout_reserved() {
+        use crate::menu::{layout_menu, MenuAction, MenuItem};
+
+        let m = Metrics::default();
+        let items = vec![MenuItem {
+            label: "A window title that runs on far past anything a menu could \
+                    reasonably be asked to show at once"
+                .into(),
+            action: Some(MenuAction::Quit),
+            checked: false,
+        }];
+
+        let mut text = TextRenderer::new();
+        let font = m.pt(m.menu_font_size);
+        let layout = layout_menu(&items, &m, |s| text.measure(s, font));
+        assert_eq!(
+            layout.width,
+            m.pt(m.menu_max_width),
+            "capped at the maximum"
+        );
+
+        // How much of the label survives, in characters, at each scale.
+        let kept = |scale: f32| {
+            let mut text = TextRenderer::new();
+            let room = (layout.width - m.pt(m.menu_item_padding) * 3.0) * scale;
+            elide(
+                &mut text,
+                &items[0].label,
+                m.pt(m.menu_font_size) * scale,
+                room,
+            )
+            .chars()
+            .count()
+        };
+
+        let at_one = kept(1.0);
+        assert!(at_one > 20, "barely any of the title survived: {at_one}");
+        assert_eq!(
+            at_one,
+            kept(2.0),
+            "the same row keeps a different amount of text on a HiDPI screen"
+        );
     }
 
     fn slot(running: bool) -> Slot {
