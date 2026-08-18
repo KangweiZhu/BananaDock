@@ -70,6 +70,11 @@ impl Frame {
         Self { edge, surface }
     }
 
+    /// Whether the row runs down the screen rather than across it.
+    pub fn is_vertical(&self) -> bool {
+        self.edge.is_vertical()
+    }
+
     /// How much room the row has to lay itself out in.
     pub fn length(&self) -> f32 {
         if self.edge.is_vertical() {

@@ -44,6 +44,10 @@ pub struct Scene<'a> {
     pub thumbnails: &'a ThumbnailCache,
     /// Tile a drag is currently hovering, if any.
     pub drop_target: Option<usize>,
+    /// Tile the pointer is resting on, which gets its name shown.
+    pub hovered: Option<usize>,
+    /// Only needed for that name, but the row cannot be drawn without it.
+    pub text: &'a mut TextRenderer,
 }
 
 /// Where the panel sits inside the surface.
@@ -200,6 +204,8 @@ pub fn draw_dock(
         icons,
         thumbnails,
         drop_target,
+        hovered,
+        text,
     } = scene;
     let t = Transform::from_scale(scale, scale);
 
@@ -354,7 +360,142 @@ pub fn draw_dock(
         }
     }
 
+    // Last of all, so it floats over anything it happens to reach across.
+    if let Some((slot, geom)) = hovered.and_then(|i| slots.get(i).zip(layout.slots.get(i))) {
+        if slot.kind != SlotKind::Separator && !slot.label.is_empty() {
+            // Clear of both the artwork and the panel: a magnified icon
+            // stands past the panel's inner face, while a small one does not
+            // reach it -- and a chip laid over the panel reads as part of it
+            // rather than as a note about the tile under the pointer.
+            let icon_px = geom.width * metrics.icon_size_ratio;
+            let icon_far =
+                panel_near + metrics.pt(metrics.icon_bottom_margin()) + geom.lift + icon_px;
+            let clear = icon_far.max(panel_near + panel_thick);
+            draw_label(
+                pixmap,
+                t,
+                scale,
+                &frame,
+                metrics,
+                palette,
+                text,
+                &slot.label,
+                row_along + geom.centre(),
+                clear + metrics.pt(metrics.label_gap),
+            );
+        }
+    }
+
     panel
+}
+
+/// The chip naming whatever the pointer is resting on.
+///
+/// Sits clear of the icon on the side away from the screen's edge, centred on
+/// the tile and nudged back inside the surface if the name is long enough to
+/// run off the end of the row -- a label that leaves the screen names nothing.
+#[allow(clippy::too_many_arguments)]
+fn draw_label(
+    pixmap: &mut Pixmap,
+    t: Transform,
+    scale: f32,
+    frame: &Frame,
+    metrics: &Metrics,
+    palette: &Palette,
+    text: &mut TextRenderer,
+    label: &str,
+    centre_along: f32,
+    across: f32,
+) {
+    let font_px = metrics.pt(metrics.label_font_size);
+    let max = metrics.pt(metrics.label_max_width);
+    let shown = elide(text, label, font_px, max);
+
+    let text_w = text.measure(&shown, font_px);
+    let w = text_w + metrics.pt(metrics.label_padding_h) * 2.0;
+    let h = metrics.pt(metrics.label_height);
+
+    // The chip is always the same way up, so on a vertical dock its width runs
+    // across the row and its height along it -- the opposite of the row's own
+    // sense of the two.
+    let (len, thick) = if frame.is_vertical() { (h, w) } else { (w, h) };
+    let along = (centre_along - len / 2.0).clamp(0.0, (frame.length() - len).max(0.0));
+    let Some(rect) = frame.rect(along, across, len, thick) else {
+        return;
+    };
+
+    let radius = metrics.pt(metrics.label_radius);
+    if let Some(path) = rounded_rect(rect, radius) {
+        let mut paint = Paint {
+            anti_alias: true,
+            ..Default::default()
+        };
+        paint.set_color(palette.menu_background.to_skia());
+        pixmap.fill_path(&path, &paint, FillRule::Winding, t, None);
+    }
+    if let Some(inner) = Rect::from_xywh(
+        rect.x() + 0.5,
+        rect.y() + 0.5,
+        rect.width() - 1.0,
+        rect.height() - 1.0,
+    ) {
+        if let Some(path) = rounded_rect(inner, radius - 0.5) {
+            let mut paint = Paint {
+                anti_alias: true,
+                ..Default::default()
+            };
+            paint.set_color(palette.menu_border.to_skia());
+            pixmap.stroke_path(
+                &path,
+                &paint,
+                &Stroke {
+                    width: 1.0,
+                    ..Default::default()
+                },
+                t,
+                None,
+            );
+        }
+    }
+
+    // Centred both ways in the chip. The text renderer draws straight into the
+    // pixmap rather than through the canvas transform, so this is the one
+    // place that has to convert to device pixels itself -- and the factor is
+    // the output's scale, not the points-to-pixels one already folded into
+    // every measurement above.
+    let line_h = font_px * scale * 1.25;
+    text.draw(
+        pixmap,
+        &shown,
+        font_px * scale,
+        (rect.x() + (rect.width() - text_w) / 2.0) * scale,
+        (rect.y() + rect.height() / 2.0) * scale - line_h / 2.0,
+        palette.menu_text,
+    );
+}
+
+/// Cuts a name short at `max`, ending it in an ellipsis.
+///
+/// Measured rather than counted: how many characters fit depends entirely on
+/// which ones they are, and a name in a script where every glyph is wide would
+/// otherwise run straight out of its chip.
+fn elide(text: &mut TextRenderer, label: &str, font_px: f32, max: f32) -> String {
+    if text.measure(label, font_px) <= max {
+        return label.to_owned();
+    }
+
+    let mut cut = label.char_indices().map(|(i, _)| i).collect::<Vec<_>>();
+    cut.push(label.len());
+    // Longest prefix that still fits once the ellipsis is on the end.
+    let mut best = String::from("…");
+    for end in cut {
+        let candidate = format!("{}…", &label[..end]);
+        if text.measure(&candidate, font_px) > max {
+            break;
+        }
+        best = candidate;
+    }
+    best
 }
 
 /// Draws the right-click menu.
@@ -779,6 +920,8 @@ mod tests {
                 icons: &mut icons,
                 thumbnails: &thumbnails,
                 drop_target: None,
+                hovered: None,
+                text: &mut TextRenderer::new(),
             },
         );
 
@@ -872,6 +1015,8 @@ mod tests {
                     icons: &mut icons,
                     thumbnails: &thumbnails,
                     drop_target: None,
+                    hovered: None,
+                    text: &mut TextRenderer::new(),
                 },
             );
 
@@ -934,6 +1079,8 @@ mod tests {
                     icons: &mut icons,
                     thumbnails: &ThumbnailCache::default(),
                     drop_target: None,
+                    hovered: None,
+                    text: &mut TextRenderer::new(),
                 },
             );
 
@@ -992,6 +1139,210 @@ mod tests {
         }
     }
 
+    /// A name too long for its chip is cut short rather than run out of it,
+    /// and the cut is measured rather than counted -- how many characters fit
+    /// depends on which ones they are.
+    #[test]
+    fn a_long_name_is_cut_short_to_fit() {
+        let mut text = TextRenderer::new();
+        let short = "Files";
+        assert_eq!(elide(&mut text, short, 13.0, 200.0), short);
+
+        let long = "A window title that goes on for far longer than any chip";
+        let cut = elide(&mut text, long, 13.0, 120.0);
+        assert!(cut.ends_with('…'), "should end in an ellipsis: {cut}");
+        assert!(text.measure(&cut, 13.0) <= 120.0, "still too wide: {cut}");
+        assert!(long.starts_with(cut.trim_end_matches('…')), "not a prefix");
+        // A width that fits nothing at all still has to produce something.
+        assert_eq!(elide(&mut text, long, 13.0, 1.0), "…");
+    }
+
+    /// Renders a frame with a tile hovered and reports whether the label's
+    /// chip landed where it was expected, in the row's own terms.
+    fn hovered_label_rect(edge: Edge, surface: (f32, f32)) -> Option<Rect> {
+        let m = Metrics {
+            edge,
+            ..Metrics::default()
+        };
+        let mut pixmap = Pixmap::new(surface.0 as u32, surface.1 as u32).unwrap();
+        let mut icons = IconCache::default();
+        let mut text = TextRenderer::new();
+        let slots = [Slot {
+            label: "Files".into(),
+            ..slot(false)
+        }];
+        let geom = crate::layout::layout(
+            &[crate::layout::SlotMetrics {
+                rest_width: m.pt(m.tile_size),
+                magnifies: true,
+            }],
+            None,
+            &m,
+        );
+        let panel = draw_dock(
+            Target {
+                pixmap: &mut pixmap,
+                logical: surface,
+                scale: 1.0,
+                slide_out: 0.0,
+            },
+            &m,
+            &Palette::default(),
+            Scene {
+                slots: &slots,
+                layout: &geom,
+                icons: &mut icons,
+                thumbnails: &ThumbnailCache::default(),
+                drop_target: None,
+                hovered: Some(0),
+                text: &mut text,
+            },
+        );
+
+        // Find the chip: the only painted thing beyond the icon's reach.
+        let frame = Frame::new(edge, surface);
+        let icon_far = frame.near_of(panel) + m.icon_bottom_margin() + m.icon_size();
+        let mut found: Option<Rect> = None;
+        for y in 0..pixmap.height() {
+            for x in 0..pixmap.width() {
+                if pixmap.pixel(x, y).unwrap().alpha() < 40 {
+                    continue;
+                }
+                if frame.across_of(x as f32, y as f32) <= icon_far + 2.0 {
+                    continue;
+                }
+                let r = Rect::from_xywh(x as f32, y as f32, 1.0, 1.0).unwrap();
+                found = Some(match found {
+                    None => r,
+                    Some(f) => Rect::from_ltrb(
+                        f.left().min(r.left()),
+                        f.top().min(r.top()),
+                        f.right().max(r.right()),
+                        f.bottom().max(r.bottom()),
+                    )
+                    .unwrap(),
+                });
+            }
+        }
+        found
+    }
+
+    /// The chip stands past the icon on the side away from the screen's edge,
+    /// whichever edge that is -- drawn behind the dock, or off the surface, it
+    /// would name nothing.
+    #[test]
+    fn the_hover_label_stands_clear_of_the_icon_on_every_edge() {
+        for (edge, surface) in [
+            (Edge::Bottom, (600.0, 400.0)),
+            (Edge::Top, (600.0, 400.0)),
+            (Edge::Left, (400.0, 600.0)),
+            (Edge::Right, (400.0, 600.0)),
+        ] {
+            let chip = hovered_label_rect(edge, surface)
+                .unwrap_or_else(|| panic!("{edge:?}: no label was drawn"));
+
+            let frame = Frame::new(edge, surface);
+            assert!(
+                frame.near_of(chip) > 0.0,
+                "{edge:?}: the chip hangs off the surface"
+            );
+            assert!(
+                chip.x() >= 0.0
+                    && chip.y() >= 0.0
+                    && chip.right() <= surface.0
+                    && chip.bottom() <= surface.1,
+                "{edge:?}: the chip is not fully on the surface: {chip:?}"
+            );
+        }
+    }
+
+    /// A tile at the very end of the row still gets a whole chip: it slides
+    /// back along the row rather than half of it leaving the screen.
+    #[test]
+    fn a_label_at_the_end_of_the_row_stays_on_screen() {
+        let m = Metrics::default();
+        let frame = Frame::new(Edge::Bottom, (200.0, 300.0));
+        let mut text = TextRenderer::new();
+        let font = m.pt(m.label_font_size);
+        let w =
+            text.measure("A rather long application name", font) + m.pt(m.label_padding_h) * 2.0;
+        // Centred on a tile hard against the row's end, the chip would start
+        // well before zero; the drawing clamps it back.
+        let along = (0.0f32 - w / 2.0).clamp(0.0, (frame.length() - w).max(0.0));
+        assert!(along >= 0.0);
+        assert!(along + w <= frame.length().max(w));
+    }
+
+    /// The chip's text is the one thing drawn straight into the pixmap rather
+    /// than through the canvas transform, so it is the one thing that can miss
+    /// the output's scale and land somewhere else entirely. A HiDPI frame is
+    /// the only place that shows: at scale 1 the mistake is invisible.
+    #[test]
+    fn the_labels_text_lands_inside_its_chip_on_a_hidpi_frame() {
+        for scale in [1.0, 2.0] {
+            let m = Metrics::default();
+            let (lw, lh) = (600.0, m.surface_depth());
+            let mut pixmap = Pixmap::new((lw * scale) as u32, (lh * scale).ceil() as u32).unwrap();
+            let mut icons = IconCache::default();
+            let mut text = TextRenderer::new();
+            let slots = [Slot {
+                label: "Files".into(),
+                ..slot(false)
+            }];
+            let geom = crate::layout::layout(
+                &[crate::layout::SlotMetrics {
+                    rest_width: m.pt(m.tile_size),
+                    magnifies: true,
+                }],
+                None,
+                &m,
+            );
+            let panel = draw_dock(
+                Target {
+                    pixmap: &mut pixmap,
+                    logical: (lw, lh),
+                    scale,
+                    slide_out: 0.0,
+                },
+                &m,
+                &Palette::default(),
+                Scene {
+                    slots: &slots,
+                    layout: &geom,
+                    icons: &mut icons,
+                    thumbnails: &ThumbnailCache::default(),
+                    drop_target: None,
+                    hovered: Some(0),
+                    text: &mut text,
+                },
+            );
+
+            // The chip sits past the icon, so anything painted there is it.
+            let chip_from = (panel.y() - m.pt(m.label_gap)) * scale;
+            let chip_to = chip_from - m.pt(m.label_height) * scale;
+            let mut chip = 0;
+            let mut glyphs = 0;
+            for y in (chip_to.max(0.0) as u32)..(chip_from as u32) {
+                for x in 0..pixmap.width() {
+                    let px = pixmap.pixel(x, y).unwrap();
+                    if px.alpha() < 40 {
+                        continue;
+                    }
+                    chip += 1;
+                    // The chip's own fill is near-black; the text is not.
+                    if px.red() > 140 && px.green() > 140 && px.blue() > 140 {
+                        glyphs += 1;
+                    }
+                }
+            }
+            assert!(chip > 0, "scale {scale}: no chip was drawn at all");
+            assert!(
+                glyphs > 20,
+                "scale {scale}: the chip is empty -- {glyphs} lit pixels of text"
+            );
+        }
+    }
+
     fn slot(running: bool) -> Slot {
         Slot {
             capture_key: None,
@@ -1042,6 +1393,8 @@ mod tests {
                 icons: &mut icons,
                 thumbnails: &ThumbnailCache::default(),
                 drop_target: None,
+                hovered: None,
+                text: &mut TextRenderer::new(),
             },
         );
         (pixmap, panel, m)

@@ -518,6 +518,8 @@ fn dump_frame(path: &str, width: u32, ids: &[String]) -> Result<(), Box<dyn std:
             icons: &mut icons,
             thumbnails: &thumbnails::ThumbnailCache::default(),
             drop_target: None,
+            hovered: None,
+            text: &mut text::TextRenderer::new(),
         },
     );
 
@@ -1050,6 +1052,14 @@ impl App {
             }
         }
 
+        // The name is shown for whatever the pointer is resting on -- but not
+        // while a menu is open or an icon is being dragged, when the tile is
+        // already spoken for and a chip would only be in the way.
+        let hovered = self
+            .pointer_along
+            .filter(|_| self.open_menu.is_none() && self.drag.is_none())
+            .and_then(|along| self.slot_at(along));
+
         let slide_out = (1.0 - self.revealed) * self.hide_distance();
         let panel = render::draw_dock(
             render::Target {
@@ -1066,6 +1076,8 @@ impl App {
                 icons: &mut self.icons,
                 thumbnails: &self.thumbnails,
                 drop_target: self.drop_target,
+                hovered,
+                text: &mut self.text,
             },
         );
 

@@ -80,6 +80,28 @@ pub struct Metrics {
     /// Vertical inset of the line from the panel's edges.
     pub separator_inset: f32,
 
+    // -- Hover label -------------------------------------------------------
+    /// The name shown while the pointer rests on a tile.
+    ///
+    /// macOS labels whatever the pointer is over -- that is how you tell two
+    /// windows of the same application apart before clicking one. The chip is
+    /// drawn in the context menu's material rather than a second one of its
+    /// own: both are the same kind of thing, a small panel of text floating
+    /// clear of the dock.
+    pub label_font_size: f32,
+    /// Space either side of the text, inside the chip.
+    pub label_padding_h: f32,
+    pub label_height: f32,
+    pub label_radius: f32,
+    /// Space between the chip and the icon it names.
+    pub label_gap: f32,
+    /// Longest a name is allowed to be before it is cut short.
+    ///
+    /// A vertical dock has to reserve this much surface beside itself for the
+    /// chip to sit in, so it cannot be unbounded -- and a chip wider than this
+    /// stops reading as a label and starts reading as a paragraph.
+    pub label_max_width: f32,
+
     // -- Minimised window thumbnails ---------------------------------------
     /// Diameter of the application badge on a minimised window's thumbnail,
     /// as a fraction of the icon artwork's size.
@@ -151,6 +173,13 @@ impl Default for Metrics {
             separator_width: 20.0,     // [measure]
             separator_line_width: 1.0, // [measure]
             separator_inset: 14.0,     // [measure]
+
+            label_font_size: 13.0,  // [measure]
+            label_padding_h: 10.0,  // [measure]
+            label_height: 24.0,     // [measure]
+            label_radius: 6.0,      // [measure]
+            label_gap: 8.0,         // [measure]
+            label_max_width: 240.0, // [measure]
 
             thumbnail_badge_ratio: 0.5, // [reference] 24px badge on a 48px tile
 
@@ -250,7 +279,25 @@ impl Metrics {
     /// not swallow clicks meant for the windows underneath.
     pub fn surface_depth(&self) -> f32 {
         let icon_reach = self.icon_bottom_margin() + self.max_icon_size();
-        self.pt(self.panel_bottom_gap + self.panel_height().max(icon_reach) + self.bounce_height)
+        self.pt(self.panel_bottom_gap
+            + self.panel_height().max(icon_reach)
+            + self.bounce_height
+            + self.label_reach())
+    }
+
+    /// How much room past the artwork the hover label needs.
+    ///
+    /// The chip stands beyond the tallest the icon ever gets, so the surface
+    /// has to carry it as well -- a label drawn past the surface's own edge is
+    /// simply not there. On a vertical dock the chip reaches sideways, and
+    /// what it needs then is its *width*, which is why the two differ.
+    pub fn label_reach(&self) -> f32 {
+        self.label_gap
+            + if self.edge.is_vertical() {
+                self.label_max_width + self.label_padding_h * 2.0
+            } else {
+                self.label_height
+            }
     }
 }
 
