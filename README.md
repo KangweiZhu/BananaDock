@@ -23,11 +23,25 @@ quietly when missing.
 | KWin (Plasma) | ✅ | ✅ via D-Bus | ✅ | ✅ via D-Bus | Fully working, and the primary target |
 | GNOME (Mutter) | ❌ | ❌ | ❌ | ❌ | **Cannot work.** See below |
 
-Thumbnails are the picture of the window itself on a minimised tile, and they
-are KWin-only: the capture goes through `org.kde.KWin.ScreenShot2`, and no
-portable protocol offers the same thing. Everywhere else a minimised window
-still gets its own tile -- it just shows the application's icon rather than the
-window.
+GNOME's own dock is not a counter-example: the Dash, and extensions like Dash
+to Dock, run *inside* GNOME Shell as JavaScript rather than as Wayland clients.
+They draw on the shell's own stage instead of asking for a layer surface, read
+`Meta.Window` instead of a foreign-toplevel protocol, and clone a window's
+actor instead of copying pixels out of it. None of those routes exist for a
+separate process, which is what this dock is.
+
+Thumbnails are the picture of the window itself on a minimised tile. Only the
+KWin route is implemented, through `org.kde.KWin.ScreenShot2`; everywhere else
+a minimised window still gets its own tile and shows the application's icon.
+
+That is a gap in this dock rather than a wall. `ext-image-copy-capture-v1`,
+with a source from `ext_foreign_toplevel_image_capture_source_manager_v1`, is
+the portable equivalent, and Hyprland also has its own
+`hyprland-toplevel-export-v1`. Two things would need checking before either is
+worth writing: whether the compositor implements it at all, and whether a
+*minimised* window still has a buffer to copy. The lazy capture here works
+because KWin keeps a minimised window's last frame; a compositor that drops it
+would force the picture to be taken before the window is hidden.
 
 ### How KWin works
 
