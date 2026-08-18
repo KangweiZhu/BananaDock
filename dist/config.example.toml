@@ -74,6 +74,11 @@ bottom_gap = 8.0
 # dock's top edge, which is what macOS does.
 window_gap = 0.0
 
+# Whether a launching application's icon hops until it is up -- macOS's
+# "Animate opening applications". The hop is the only sign a click did anything
+# while an application is still starting.
+launch_bounce = true
+
 show_trash = true
 
 # Whether a minimised window gets its own tile to the right of the applications,

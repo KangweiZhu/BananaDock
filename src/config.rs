@@ -92,6 +92,12 @@ pub struct Config {
     /// Zero puts a maximised window's edge on the dock's top edge, as macOS
     /// does. This moves the windows; `bottom_gap` moves the dock.
     pub window_gap: f32,
+    /// Whether a launching application's icon hops until it is up.
+    ///
+    /// macOS puts the same switch in Desktop & Dock as "Animate opening
+    /// applications". The hop is the only sign a click did anything at all
+    /// while an application is still starting, so it is on by default.
+    pub launch_bounce: bool,
     pub show_trash: bool,
     /// Whether a minimised window gets its own tile to the right of the
     /// applications, as macOS does by default, or only shows through its
@@ -125,6 +131,7 @@ impl Default for Config {
             border_width: None,
             bottom_gap: 8.0,
             window_gap: 0.0,
+            launch_bounce: true,
             show_trash: true,
             separate_minimized: true,
             icon_theme: None,
@@ -579,6 +586,18 @@ mod tests {
             set.palette(Appearance::Light).dot,
             Palette::for_appearance(Appearance::Light).dot
         );
+    }
+
+    /// The bounce is on unless it is turned off, and turning it off must not
+    /// disturb anything else in the file.
+    #[test]
+    fn the_launch_bounce_can_be_turned_off() {
+        assert!(Config::default().launch_bounce, "the hop is on by default");
+
+        let off = Config::parse("launch_bounce = false").unwrap();
+        assert!(!off.launch_bounce);
+        assert_eq!(off.magnification, Config::default().magnification);
+        assert_eq!(off.auto_hide, Config::default().auto_hide);
     }
 
     /// The rim's width is settable the same way the tint is, and zero has to

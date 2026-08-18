@@ -2062,7 +2062,13 @@ impl App {
         // as a zombie for the dock to reap.
         match cmd.spawn() {
             Ok(mut child) => {
-                self.launching.insert(pending.key, Instant::now());
+                // Queued only when the hop is wanted: the entry is what keeps
+                // frames coming as well as what lifts the icon, so leaving it
+                // out settles the dock straight away rather than animating
+                // nothing for the length of a launch.
+                if self.config.launch_bounce {
+                    self.launching.insert(pending.key, Instant::now());
+                }
                 std::thread::spawn(move || {
                     let _ = child.wait();
                 });

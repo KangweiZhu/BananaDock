@@ -203,6 +203,11 @@ pub fn controls(config: &Config, appearance: Appearance) -> Vec<Control> {
             value: config.auto_hide,
         },
         Control::Toggle {
+            key: "launch_bounce",
+            label: "Bounce when launching",
+            value: config.launch_bounce,
+        },
+        Control::Toggle {
             key: "show_trash",
             label: "Show Trash",
             value: config.show_trash,

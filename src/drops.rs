@@ -93,7 +93,7 @@ mod tests {
 
     #[test]
     fn multibyte_escapes_decode_to_utf8() {
-        // "文件" percent-encoded.
+        // A non-ASCII name, percent-encoded a byte at a time.
         let list = "file:///tmp/%E6%96%87%E4%BB%B6\r\n";
         assert_eq!(parse_uri_list(list), vec![PathBuf::from("/tmp/文件")]);
     }
