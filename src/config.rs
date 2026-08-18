@@ -62,6 +62,13 @@ pub struct Config {
     /// Space between the end icons and the panel's edges, in points. This is
     /// what makes the panel wider than the row it holds.
     pub panel_padding: f32,
+    /// Space between the dock and the screen's bottom edge, in points.
+    pub bottom_gap: f32,
+    /// Space between the dock and the windows above it, in points.
+    ///
+    /// Zero puts a maximised window's edge on the dock's top edge, as macOS
+    /// does. This moves the windows; `bottom_gap` moves the dock.
+    pub window_gap: f32,
     pub show_trash: bool,
     /// Whether a minimised window gets its own tile to the right of the
     /// applications, as macOS does by default, or only shows through its
@@ -89,6 +96,8 @@ impl Default for Config {
             auto_hide: false,
             panel_radius: 0.5,
             panel_padding: 8.0,
+            bottom_gap: 8.0,
+            window_gap: 0.0,
             show_trash: true,
             separate_minimized: true,
             icon_theme: None,
@@ -192,6 +201,8 @@ impl Config {
         // clamps anyway -- rejecting it here keeps the config honest.
         metrics.panel_radius_ratio = self.panel_radius.clamp(0.0, 0.5);
         metrics.panel_padding_h = self.panel_padding.max(0.0);
+        metrics.panel_bottom_gap = self.bottom_gap.max(0.0);
+        metrics.window_gap = self.window_gap.max(0.0);
     }
 }
 
@@ -459,6 +470,46 @@ mod tests {
             .apply_to(&mut m);
         assert!((m.tile_size - 47.0).abs() < 0.01);
         assert!((m.icon_size() - 37.0).abs() < 0.01);
+    }
+
+    /// The two gaps move different things: one the dock, one the windows.
+    /// Reserving the same amount for both would put the dock's own float above
+    /// the screen edge into the windows' pocket, or vice versa.
+    #[test]
+    fn the_two_gaps_move_the_dock_and_the_windows_separately() {
+        let apply = |doc: &str| {
+            let mut m = Metrics::default();
+            Config::parse(doc).unwrap().apply_to(&mut m);
+            m
+        };
+
+        let base = apply("panel_height = 80.0");
+        let lifted = apply("panel_height = 80.0\nbottom_gap = 28.0");
+        let roomy = apply("panel_height = 80.0\nwindow_gap = 28.0");
+
+        // Raising the dock off the screen edge moves the dock, and windows
+        // follow it up because the space underneath is still the dock's.
+        assert_eq!(lifted.panel_bottom_gap - base.panel_bottom_gap, 20.0);
+        assert_eq!(
+            lifted.window_clearance() - base.window_clearance(),
+            20.0,
+            "the dock's float is reserved too"
+        );
+        // Asking for room above the dock moves only the windows.
+        assert_eq!(roomy.panel_bottom_gap, base.panel_bottom_gap);
+        assert_eq!(roomy.window_clearance() - base.window_clearance(), 28.0);
+    }
+
+    /// A negative gap would hand the compositor a nonsense strut.
+    #[test]
+    fn negative_gaps_are_clamped_away() {
+        let mut m = Metrics::default();
+        Config::parse("bottom_gap = -10.0\nwindow_gap = -10.0")
+            .unwrap()
+            .apply_to(&mut m);
+        assert_eq!(m.panel_bottom_gap, 0.0);
+        assert_eq!(m.window_gap, 0.0);
+        assert_eq!(m.window_clearance(), m.pt(m.panel_height()));
     }
 
     /// `panel_height` is the one direct lever over the dock's height.

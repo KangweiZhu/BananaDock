@@ -129,6 +129,24 @@ pub fn controls(config: &Config) -> Vec<Control> {
             max: 32.0,
             unit: "pt",
         },
+        Control::Slider {
+            key: "bottom_gap",
+            // Moves the dock: how far it floats above the screen's edge.
+            label: "Distance from edge",
+            value: config.bottom_gap,
+            min: 0.0,
+            max: 48.0,
+            unit: "pt",
+        },
+        Control::Slider {
+            key: "window_gap",
+            // Moves the windows: how much room they leave above the dock.
+            label: "Distance from windows",
+            value: config.window_gap,
+            min: 0.0,
+            max: 48.0,
+            unit: "pt",
+        },
         Control::Heading("Behaviour"),
         Control::Toggle {
             key: "auto_hide",

@@ -45,6 +45,16 @@ panel_radius = 0.5
 # makes the panel wider than the row of icons it holds.
 panel_padding = 8.0
 
+# Space between the dock and the screen's bottom edge, in points. Moves the
+# dock; maximised windows follow it up, since the space underneath still
+# belongs to the dock.
+bottom_gap = 8.0
+
+# Space between the dock and the windows above it, in points. Moves the
+# windows, not the dock. Zero puts a maximised window's edge exactly on the
+# dock's top edge, which is what macOS does.
+window_gap = 0.0
+
 show_trash = true
 
 # Whether a minimised window gets its own tile to the right of the applications,

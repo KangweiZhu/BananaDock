@@ -1074,7 +1074,7 @@ impl App {
         let strut = if self.config.auto_hide {
             0.0
         } else {
-            self.hide_distance()
+            self.metrics.window_clearance()
         };
         self.dock.set_exclusive_zone(strut.round() as i32);
 

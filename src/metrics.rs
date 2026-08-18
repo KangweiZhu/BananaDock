@@ -36,7 +36,16 @@ pub struct Metrics {
 
     // -- Panel -----------------------------------------------------------
     pub panel_padding_h: f32,
+    /// Space between the panel and the screen's bottom edge.
     pub panel_bottom_gap: f32,
+    /// Extra space above the panel that maximised windows must leave alone,
+    /// on top of the panel itself and the gap under it.
+    ///
+    /// Zero puts a maximised window's edge exactly on the panel's top edge,
+    /// which is what macOS does. Raising it is the only way to put air between
+    /// the two: the gap under the panel is measured from the screen's edge and
+    /// moves the dock, whereas this moves the windows.
+    pub window_gap: f32,
     /// The panel's height at rest, in points. Reference: 89/67 of the 64pt
     /// pitch, i.e. 85pt.
     ///
@@ -124,6 +133,7 @@ impl Default for Metrics {
 
             panel_padding_h: 8.0,      // [measure]
             panel_bottom_gap: 8.0,     // [measure]
+            window_gap: 0.0,           // [reference] windows meet the panel's edge
             panel_base_height: 85.12,  // [reference] 89/67 of the 64pt pitch
             icon_top_pad_ratio: 0.225, // [reference] 20/89
             panel_radius_ratio: 0.5,   // [reference] semicircular end caps
@@ -212,6 +222,16 @@ impl Metrics {
     /// Icon artwork at full magnification.
     pub fn max_icon_size(&self) -> f32 {
         self.large_size * self.icon_size_ratio
+    }
+
+    /// How much of the screen the dock asks maximised windows to leave alone.
+    ///
+    /// The panel, the gap it floats above the screen's edge, and whatever
+    /// extra clearance was asked for -- but deliberately not the magnification
+    /// headroom above the panel, which a window is welcome to sit behind. The
+    /// dock only ever borrows that room for an icon that has grown into it.
+    pub fn window_clearance(&self) -> f32 {
+        self.pt(self.panel_height() + self.panel_bottom_gap + self.window_gap.max(0.0))
     }
 
     /// The surface has to contain the panel, the gap below it, and the headroom
