@@ -514,6 +514,39 @@ mod tests {
         assert!((m.icon_size() - 37.0).abs() < 0.01);
     }
 
+    /// Pinning an appearance and then letting go of the pin has to land back
+    /// on the desktop's own answer. The dock keeps the two apart for exactly
+    /// this: fold them into one value and the pinned appearance overwrites
+    /// what the desktop said, leaving nothing to come back to.
+    #[test]
+    fn letting_go_of_a_pinned_appearance_falls_back_to_the_desktop() {
+        let desktop = Appearance::Light;
+        let effective = |doc: &str| {
+            Config::parse(doc)
+                .unwrap()
+                .forced_appearance()
+                .unwrap_or(desktop)
+        };
+
+        assert_eq!(effective(""), Appearance::Light, "follows the desktop");
+        assert_eq!(effective(r#"appearance = "dark""#), Appearance::Dark);
+        assert_eq!(effective(r#"appearance = "light""#), Appearance::Light);
+        // Back to following, with the desktop's answer intact.
+        assert_eq!(effective(r#"appearance = "system""#), Appearance::Light);
+    }
+
+    /// A spelling nobody recognises follows the desktop rather than taking the
+    /// whole file down with it.
+    #[test]
+    fn an_unknown_appearance_follows_the_desktop() {
+        assert_eq!(
+            Config::parse(r#"appearance = "midnight""#)
+                .unwrap()
+                .forced_appearance(),
+            None
+        );
+    }
+
     /// The two gaps move different things: one the dock, one the windows.
     /// Reserving the same amount for both would put the dock's own float above
     /// the screen edge into the windows' pocket, or vice versa.

@@ -309,7 +309,7 @@ impl Metrics {
 /// it first appears -- in the reference the wallpaper's colour reads clearly
 /// through the panel. Most of the look comes from the blur, not from this tint,
 /// so keeping it light matters: raise it and the blur gets washed out.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Palette {
     pub panel_tint: Color,
     /// [reference] A bright hairline runs along both the top and bottom edges.
@@ -334,7 +334,7 @@ pub struct Palette {
 }
 
 /// Straight non-premultiplied RGBA, 0.0-1.0.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Color {
     pub r: f32,
     pub g: f32,

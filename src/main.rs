@@ -172,10 +172,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // configuration pins it. Asked once here and then watched for changes, so
     // a dock started before dusk does not stay dark through the morning.
     let bus = zbus::blocking::Connection::session().ok();
-    let started_in = config
-        .forced_appearance()
-        .or_else(|| appearance::detect(bus.as_ref()))
-        .unwrap_or_default();
+    let from_desktop = appearance::detect(bus.as_ref()).unwrap_or_default();
+    let started_in = config.forced_appearance().unwrap_or(from_desktop);
 
     let toplevels = ForeignToplevelManager::new(&globals, &qh);
 
@@ -253,7 +251,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         trash_dir,
         metrics,
         palette: Palette::for_appearance(started_in),
-        appearance: started_in,
+        desktop_appearance: from_desktop,
         pointer_along: None,
         current_widths: Vec::new(),
         last_frame_ms: None,
@@ -658,9 +656,13 @@ struct App {
     trash_dir: Option<std::path::PathBuf>,
     metrics: Metrics,
     palette: Palette,
-    /// The appearance the desktop last reported, so a configuration that stops
-    /// pinning one can fall back to it without asking the portal again.
-    appearance: Appearance,
+    /// What the *desktop* last reported -- never what the configuration pinned.
+    ///
+    /// The two have to be kept apart. Folding them into one value loses the
+    /// desktop's own answer the moment the configuration pins an appearance,
+    /// and then unpinning has nothing to fall back to: the dock stays in the
+    /// appearance it was pinned to until the desktop happens to change.
+    desktop_appearance: Appearance,
 
     /// Pointer position in *resting-layout* coordinates, or `None` when the
     /// pointer is away and the row should collapse.
@@ -747,24 +749,29 @@ impl App {
         }
     }
 
-    /// Repaints in the desktop's new appearance.
+    /// Notes the desktop's new appearance, and repaints if it is on show.
     ///
-    /// Ignored when the configuration pins the dock to one appearance: the
-    /// desktop is still entitled to change its mind, and the dock is still
-    /// entitled to have been told not to care.
+    /// Recorded even while the configuration pins the dock to one appearance:
+    /// the desktop is entitled to change its mind, the dock is entitled to
+    /// have been told not to follow it, and dropping the pin later has to land
+    /// on what the desktop actually says now.
     fn apply_appearance(&mut self, now: Appearance) {
-        if self.config.forced_appearance().is_some() {
-            return;
-        }
-        self.set_appearance(now);
+        self.desktop_appearance = now;
+        self.repalette();
     }
 
-    fn set_appearance(&mut self, now: Appearance) {
-        if now == self.appearance {
+    /// Draws in whichever appearance is in force: the pinned one, or failing
+    /// that the desktop's.
+    fn repalette(&mut self) {
+        let now = self
+            .config
+            .forced_appearance()
+            .unwrap_or(self.desktop_appearance);
+        let palette = Palette::for_appearance(now);
+        if palette == self.palette {
             return;
         }
-        self.appearance = now;
-        self.palette = Palette::for_appearance(now);
+        self.palette = palette;
         self.draw();
     }
 
@@ -1213,16 +1220,15 @@ impl App {
         if self.config.icon_theme != fresh.icon_theme {
             self.icons = IconCache::new(fresh.icon_theme.clone());
         }
-        // Pinning the dock to one appearance, or letting go of the pin: either
-        // way the answer is whatever the file now says, falling back to what
-        // the desktop last told us.
-        if self.config.appearance != fresh.appearance {
-            let now = fresh.forced_appearance().unwrap_or(self.appearance);
-            self.appearance = now;
-            self.palette = Palette::for_appearance(now);
-        }
+        let appearance_changed = self.config.appearance != fresh.appearance;
         self.pinned = fresh.pinned.clone();
         self.config = fresh;
+        // Pinning the dock to an appearance, or letting go of the pin: either
+        // way the answer comes from the fresh configuration, falling back to
+        // what the desktop last told us.
+        if appearance_changed {
+            self.repalette();
+        }
 
         if now != was {
             // Moving to another edge re-anchors the surface, which the
