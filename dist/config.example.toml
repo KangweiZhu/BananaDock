@@ -37,6 +37,12 @@ magnification_range = 2.5
 # so windows get the whole screen.
 auto_hide = false
 
+# How much tint sits over the blurred desktop behind the panel: 0 is clear
+# glass, 1 a solid slab. Leave it out to follow the reference, which is only a
+# few percent -- the dock's look comes from the blur, and tint mostly washes it
+# out. Raise it for a dock that reads as a panel over a busy wallpaper.
+#panel_tint = 0.12
+
 # Panel corner radius as a fraction of its height. 0.5 makes the ends
 # semicircular -- the capsule macOS uses -- and 0 makes it a plain rectangle.
 panel_radius = 0.5

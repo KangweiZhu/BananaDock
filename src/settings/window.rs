@@ -35,7 +35,7 @@ use super::{
     paint,
     ui::{self, Control, Hit},
 };
-use crate::{config::Config, text::TextRenderer};
+use crate::{appearance::Appearance, config::Config, text::TextRenderer};
 
 /// Shortest gap between saves while a slider is being dragged. Fast enough to
 /// read as continuous, slow enough not to rewrite the file on every motion
@@ -54,7 +54,16 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let path = Config::path().ok_or("no writable configuration directory")?;
     let config = Config::load(&path);
-    let controls = ui::controls(&config);
+    // An ordinary window among the user's other ones, so it wears the
+    // desktop's appearance too -- and the controls have to show the values
+    // *that* appearance is drawn with, since the tint's default differs
+    // between the two. Read once at startup: unlike the dock, this window is
+    // opened, used and closed, so it never sits through a dusk.
+    let appearance = config
+        .forced_appearance()
+        .or_else(|| crate::appearance::detect(zbus::blocking::Connection::session().ok().as_ref()))
+        .unwrap_or_default();
+    let controls = ui::controls(&config, appearance);
     let (_, height) = ui::rows(&controls);
 
     let surface = compositor.create_surface(&qh);
@@ -80,18 +89,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         pointer: None,
         text: TextRenderer::new(),
         path,
-        // The window follows the desktop's appearance the same way the dock
-        // does, and for the same reason: it is an ordinary window among the
-        // user's other ones. Read once at startup -- unlike the dock, this
-        // window is opened, used and closed, so it never sits through a dusk.
-        theme: paint::Theme::for_appearance(
-            config
-                .forced_appearance()
-                .or_else(|| {
-                    crate::appearance::detect(zbus::blocking::Connection::session().ok().as_ref())
-                })
-                .unwrap_or_default(),
-        ),
+        theme: paint::Theme::for_appearance(appearance),
+        appearance,
         config,
         controls,
         width: size.0,
@@ -119,6 +118,7 @@ struct Settings {
     pointer: Option<wl_pointer::WlPointer>,
     text: TextRenderer,
     theme: paint::Theme,
+    appearance: Appearance,
 
     path: std::path::PathBuf,
     config: Config,
@@ -144,7 +144,7 @@ impl Settings {
             return;
         }
         self.config = Config::load(&self.path);
-        self.controls = ui::controls(&self.config);
+        self.controls = ui::controls(&self.config, self.appearance);
     }
 
     /// Writes a slider's final value when the drag ends.

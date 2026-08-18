@@ -14,7 +14,11 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-use crate::{appearance::Appearance, edge::Edge, metrics::Metrics};
+use crate::{
+    appearance::Appearance,
+    edge::Edge,
+    metrics::{Metrics, Palette},
+};
 
 /// The XDG config directory, `~/.config` when unset.
 pub fn config_home() -> Option<PathBuf> {
@@ -68,6 +72,13 @@ pub struct Config {
     /// `system` to follow the desktop's light/dark setting, as macOS does, or
     /// `light` / `dark` to pin the dock to one of them.
     pub appearance: String,
+    /// How much tint sits over the blurred desktop behind the panel: 0 is
+    /// clear glass, 1 a solid slab.
+    ///
+    /// Unset follows the reference, which is a few percent either way -- the
+    /// dock's look comes from the blur, and tint mostly washes it out. Raising
+    /// it is the way to get a dock that reads as a panel on a busy wallpaper.
+    pub panel_tint: Option<f32>,
     /// Space between the dock and the screen edge it sits on, in points.
     pub bottom_gap: f32,
     /// Space between the dock and the windows above it, in points.
@@ -104,6 +115,7 @@ impl Default for Config {
             panel_padding: 8.0,
             position: "bottom".into(),
             appearance: "system".into(),
+            panel_tint: None,
             bottom_gap: 8.0,
             window_gap: 0.0,
             show_trash: true,
@@ -220,6 +232,20 @@ impl Config {
             );
         }
         parsed
+    }
+
+    /// The tint in force, which is the reference's unless it was overridden.
+    pub fn effective_panel_tint(&self, appearance: Appearance) -> f32 {
+        self.panel_tint
+            .unwrap_or_else(|| Palette::for_appearance(appearance).panel_tint.a)
+            .clamp(0.0, 1.0)
+    }
+
+    /// The palette to draw in, once the user has had their say about it.
+    pub fn palette(&self, appearance: Appearance) -> Palette {
+        let mut palette = Palette::for_appearance(appearance);
+        palette.panel_tint.a = self.effective_panel_tint(appearance);
+        palette
     }
 
     /// Folds the user's preferences into the measured proportions.
@@ -512,6 +538,41 @@ mod tests {
             .apply_to(&mut m);
         assert!((m.tile_size - 47.0).abs() < 0.01);
         assert!((m.icon_size() - 37.0).abs() < 0.01);
+    }
+
+    /// The tint is the one piece of the palette the user can move. Unset it
+    /// follows the reference for whichever appearance is in force -- and those
+    /// two differ, so the setting cannot just carry one number for both.
+    #[test]
+    fn the_tint_follows_the_reference_until_it_is_set() {
+        let unset = Config::default();
+        assert_eq!(
+            unset.effective_panel_tint(Appearance::Dark),
+            Palette::for_appearance(Appearance::Dark).panel_tint.a
+        );
+        assert_eq!(
+            unset.effective_panel_tint(Appearance::Light),
+            Palette::for_appearance(Appearance::Light).panel_tint.a
+        );
+
+        // Set, it applies to both and reaches the palette that gets drawn.
+        let set = Config::parse("panel_tint = 0.4").unwrap();
+        assert_eq!(set.effective_panel_tint(Appearance::Dark), 0.4);
+        assert_eq!(set.palette(Appearance::Light).panel_tint.a, 0.4);
+        // ...and the rest of the palette is untouched by it.
+        assert_eq!(
+            set.palette(Appearance::Light).dot,
+            Palette::for_appearance(Appearance::Light).dot
+        );
+    }
+
+    /// A tint outside 0..1 would either invert the fill or blow past opaque.
+    #[test]
+    fn a_tint_outside_the_range_is_clamped() {
+        let low = Config::parse("panel_tint = -1.0").unwrap();
+        let high = Config::parse("panel_tint = 5.0").unwrap();
+        assert_eq!(low.effective_panel_tint(Appearance::Dark), 0.0);
+        assert_eq!(high.effective_panel_tint(Appearance::Dark), 1.0);
     }
 
     /// Pinning an appearance and then letting go of the pin has to land back

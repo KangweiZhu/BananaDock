@@ -10,7 +10,7 @@
 //! Geometry and hit testing live here, apart from the drawing, so the part that
 //! decides *what a click did* can be tested without a compositor.
 
-use crate::config::Config;
+use crate::{appearance::Appearance, config::Config};
 
 /// The edges a dock can sit on, in the order the choice shows them.
 const EDGES: &[&str] = &["bottom", "left", "right", "top"];
@@ -76,7 +76,7 @@ impl Control {
 /// Only scalar settings appear. The icon theme and output are free text, and
 /// the pinned list is reordered by dragging in the dock itself, so neither
 /// belongs in a column of toggles.
-pub fn controls(config: &Config) -> Vec<Control> {
+pub fn controls(config: &Config, appearance: Appearance) -> Vec<Control> {
     vec![
         Control::Heading("Size"),
         Control::Slider {
@@ -140,6 +140,17 @@ pub fn controls(config: &Config) -> Vec<Control> {
             min: 48.0,
             max: 128.0,
             unit: "pt",
+        },
+        Control::Slider {
+            key: "panel_tint",
+            // Not the panel's transparency: the blur behind it stays either
+            // way. This is how much colour is laid over that blur, which is
+            // what decides whether the dock reads as glass or as a slab.
+            label: "Background tint",
+            value: config.effective_panel_tint(appearance),
+            min: 0.0,
+            max: 1.0,
+            unit: "%",
         },
         Control::Slider {
             key: "panel_radius",
@@ -294,8 +305,9 @@ pub fn hit(controls: &[Control], width: f32, x: f32, y: f32) -> Option<Hit> {
 pub fn quantise(value: f32, unit: &str) -> f32 {
     match unit {
         "tiles" => (value * 10.0).round() / 10.0,
-        // A radius runs 0..0.5, so whole numbers would leave two usable stops.
-        "of height" => (value * 100.0).round() / 100.0,
+        // A radius runs 0..0.5, and a tint 0..1, so whole numbers would leave
+        // two or three usable stops between them.
+        "of height" | "%" => (value * 100.0).round() / 100.0,
         _ => value.round(),
     }
 }
@@ -305,7 +317,7 @@ mod tests {
     use super::*;
 
     fn sliders_and_toggles() -> Vec<Control> {
-        controls(&Config::default())
+        controls(&Config::default(), Appearance::Dark)
     }
 
     /// Every control has to name a field the config actually has. `Config`
@@ -387,8 +399,8 @@ mod tests {
         let narrow = Config::parse("icon_spacing = 4.0\nicon_size = 37.0").unwrap();
         let wide = Config::parse("icon_spacing = 48.0\nicon_size = 37.0").unwrap();
 
-        let a = controls(&narrow);
-        let b = controls(&wide);
+        let a = controls(&narrow, Appearance::Dark);
+        let b = controls(&wide, Appearance::Dark);
         let icon = index_of(&a, "icon_size");
         assert_eq!(a[icon], b[index_of(&b, "icon_size")]);
     }

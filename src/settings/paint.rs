@@ -140,6 +140,9 @@ pub fn draw(
                     let shown = match *unit {
                         "tiles" => format!("{value:.1} {unit}"),
                         "of height" => format!("{value:.2} {unit}"),
+                        // A fraction reads as a percentage, which is how
+                        // anyone would say it out loud.
+                        "%" => format!("{:.0} {unit}", value * 100.0),
                         _ => format!("{value:.0} {unit}"),
                     };
                     let w = text.measure(&shown, LABEL_SIZE);
@@ -284,7 +287,7 @@ mod tests {
     const THEME: Theme = Theme::for_appearance(Appearance::Dark);
 
     fn render() -> Pixmap {
-        let controls = ui::controls(&Config::default());
+        let controls = ui::controls(&Config::default(), Appearance::Dark);
         let (_, h) = ui::rows(&controls);
         let mut pixmap = Pixmap::new(ui::WINDOW_WIDTH as u32, h as u32).unwrap();
         let mut text = TextRenderer::new();
@@ -338,7 +341,7 @@ mod tests {
     #[test]
     fn labels_are_vertically_centred_in_their_rows() {
         let pixmap = render();
-        let controls = ui::controls(&Config::default());
+        let controls = ui::controls(&Config::default(), Appearance::Dark);
         let (tops, _) = ui::rows(&controls);
 
         for (control, top) in controls.iter().zip(&tops) {
@@ -368,7 +371,7 @@ mod tests {
     #[test]
     fn every_row_draws_something() {
         let pixmap = render();
-        let controls = ui::controls(&Config::default());
+        let controls = ui::controls(&Config::default(), Appearance::Dark);
         let (tops, _) = ui::rows(&controls);
 
         for (control, top) in controls.iter().zip(&tops) {

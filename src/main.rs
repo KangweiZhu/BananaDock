@@ -174,6 +174,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bus = zbus::blocking::Connection::session().ok();
     let from_desktop = appearance::detect(bus.as_ref()).unwrap_or_default();
     let started_in = config.forced_appearance().unwrap_or(from_desktop);
+    let palette = config.palette(started_in);
 
     let toplevels = ForeignToplevelManager::new(&globals, &qh);
 
@@ -250,7 +251,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or(model::TrashState { full: false }),
         trash_dir,
         metrics,
-        palette: Palette::for_appearance(started_in),
+        palette,
         desktop_appearance: from_desktop,
         pointer_along: None,
         current_widths: Vec::new(),
@@ -760,14 +761,14 @@ impl App {
         self.repalette();
     }
 
-    /// Draws in whichever appearance is in force: the pinned one, or failing
-    /// that the desktop's.
+    /// Draws in whichever appearance is in force -- the pinned one, or failing
+    /// that the desktop's -- with the user's own adjustments folded in.
     fn repalette(&mut self) {
         let now = self
             .config
             .forced_appearance()
             .unwrap_or(self.desktop_appearance);
-        let palette = Palette::for_appearance(now);
+        let palette = self.config.palette(now);
         if palette == self.palette {
             return;
         }
@@ -1220,15 +1221,13 @@ impl App {
         if self.config.icon_theme != fresh.icon_theme {
             self.icons = IconCache::new(fresh.icon_theme.clone());
         }
-        let appearance_changed = self.config.appearance != fresh.appearance;
         self.pinned = fresh.pinned.clone();
         self.config = fresh;
-        // Pinning the dock to an appearance, or letting go of the pin: either
-        // way the answer comes from the fresh configuration, falling back to
-        // what the desktop last told us.
-        if appearance_changed {
-            self.repalette();
-        }
+        // Pinning the dock to an appearance, letting go of the pin, or just
+        // moving the tint: the palette is rebuilt from the fresh configuration
+        // either way, and redraws only if something actually came out
+        // different.
+        self.repalette();
 
         if now != was {
             // Moving to another edge re-anchors the surface, which the
