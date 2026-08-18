@@ -95,6 +95,17 @@ impl Layout {
 ///
 /// The hop is followed by a pause, and the whole cycle repeats for as long as
 /// the application is still starting.
+/// Whether a launch's bounce should carry on.
+///
+/// Dropping it the moment the application appears snaps the icon back to the
+/// ground from wherever it happened to be in the arc, and an application that
+/// starts quickly is caught barely off the ground -- which reads as a twitch
+/// rather than as a bounce. macOS lets the hop in progress finish, so this
+/// keeps going until the icon next touches down.
+pub fn bounce_continues(elapsed_ms: f32, ready: bool, metrics: &Metrics) -> bool {
+    !ready || bounce_offset(elapsed_ms, metrics) > 0.0
+}
+
 pub fn bounce_offset(elapsed_ms: f32, metrics: &Metrics) -> f32 {
     let hop = metrics.bounce_duration_ms as f32;
     let cycle = hop + metrics.bounce_rest_duration_ms as f32;
@@ -247,6 +258,52 @@ pub fn layout(slots: &[SlotMetrics], cursor_rest_x: Option<f32>, metrics: &Metri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The bounce must not be cut off mid-air. An application that appears
+    /// almost at once -- 90ms was measured on a warm start -- caught the icon
+    /// barely off the ground and dropped it back, which is a twitch, not a
+    /// hop.
+    #[test]
+    fn a_bounce_finishes_the_hop_it_is_in() {
+        let m = Metrics::default();
+        let hop = m.bounce_duration_ms as f32;
+        let cycle = hop + m.bounce_rest_duration_ms as f32;
+
+        // Still starting: it carries on wherever it is.
+        assert!(bounce_continues(10.0, false, &m));
+        assert!(bounce_continues(hop + 20.0, false, &m));
+
+        // Up and running, but the icon is in the air: finish the hop.
+        assert!(bounce_continues(90.0, true, &m), "cut off on the way up");
+        assert!(
+            bounce_continues(hop * 0.9, true, &m),
+            "cut off on the way down"
+        );
+
+        // ...and once it has landed, that is the end of it.
+        assert!(!bounce_continues(hop + 1.0, true, &m));
+        assert!(!bounce_continues(cycle - 1.0, true, &m));
+    }
+
+    /// A slow application keeps hopping: the icon leaves the ground again
+    /// after each rest, for as long as it takes.
+    #[test]
+    fn a_slow_launch_keeps_hopping() {
+        let m = Metrics::default();
+        let cycle = (m.bounce_duration_ms + m.bounce_rest_duration_ms) as f32;
+
+        for n in 0..4 {
+            let apex = n as f32 * cycle + m.bounce_duration_ms as f32 * 0.45;
+            assert!(
+                bounce_offset(apex, &m) > m.pt(m.bounce_height) * 0.9,
+                "hop {n} does not reach its apex"
+            );
+            assert!(
+                bounce_continues(apex, false, &m),
+                "hop {n} was dropped mid-air"
+            );
+        }
+    }
 
     fn tiles(n: usize, m: &Metrics) -> Vec<SlotMetrics> {
         vec![

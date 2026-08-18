@@ -1916,6 +1916,10 @@ impl App {
 
     /// Drops applications that have finished starting, or that never will.
     ///
+    /// "Finished" means the application is up *and* its icon has come back
+    /// down: an application that starts in under a hop would otherwise have
+    /// its icon caught in mid-air and dropped straight back to the ground.
+    ///
     /// Without the timeout a launch that fails silently -- a missing binary, an
     /// app that exits immediately -- would leave its icon bouncing forever.
     fn prune_launching(&mut self) {
@@ -1926,8 +1930,16 @@ impl App {
             .filter(|s| s.is_running())
             .map(|s| s.key.clone())
             .collect();
-        self.launching
-            .retain(|key, started| !running.contains(key) && started.elapsed() < GIVE_UP);
+        let metrics = self.metrics;
+        self.launching.retain(|key, started| {
+            let elapsed = started.elapsed();
+            elapsed < GIVE_UP
+                && layout::bounce_continues(
+                    elapsed.as_millis() as f32,
+                    running.contains(key),
+                    &metrics,
+                )
+        });
     }
 
     fn launch(&mut self, slot: &Slot, serial: Option<u32>, qh: &QueueHandle<Self>) {
