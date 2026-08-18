@@ -60,8 +60,12 @@ pub struct Metrics {
     /// artwork rearranges the margins inside the panel. Neither should move
     /// the dock's top edge. See [`Self::panel_height`] for the one exception.
     pub panel_base_height: f32,
-    /// Icons sit slightly above centre; the extra room underneath is where the
-    /// running dots go. Reference: 20px above, 24px below, of 89px.
+    /// Share of the panel's height kept clear above the icon before the panel
+    /// has to grow, from the reference's 20 of 89.
+    ///
+    /// Only [`Self::panel_height`] uses it, as the point past which an icon no
+    /// longer fits. How the leftover room is divided above and below the icon
+    /// is [`Self::icon_bottom_margin`]'s business, and is measured separately.
     pub icon_top_pad_ratio: f32,
     /// Tahoe's dock is a capsule -- the end caps are semicircular, so the
     /// radius is exactly half the height.
@@ -245,12 +249,20 @@ impl Metrics {
 
     /// Gap between the bottom of the icon artwork and the bottom of the panel.
     ///
-    /// Whatever height the panel does not give to the icon is split in the
-    /// reference's proportion -- 20 above to 24 below -- so the artwork sits
-    /// slightly above centre at every size instead of hanging from a fixed
-    /// top line when it is small.
+    /// Whatever height the panel does not give to the icon is split slightly
+    /// in favour of the bottom, so the artwork sits a little above centre at
+    /// every size instead of hanging from a fixed top line when it is small.
+    /// The room underneath is where the running dots go.
+    ///
+    /// [reference] 41 above to 43 below, measured off Apple's own dock
+    /// artwork: a 166px panel carrying an 82px icon. An earlier measurement of
+    /// a Tahoe press shot read 20 to 24 of 89, which is the same direction but
+    /// four times the bias; on a thin panel that reads as an icon that simply
+    /// missed the centre, which is what it was reported as. The two agree on
+    /// the icon's own share of the panel (49.4% against 50.6%), so only the
+    /// split is in question, and this is the one that can be re-measured.
     pub fn icon_bottom_margin(&self) -> f32 {
-        const BOTTOM_SHARE: f32 = 24.0 / 44.0;
+        const BOTTOM_SHARE: f32 = 43.0 / 84.0;
         (self.panel_height() - self.icon_size()).max(0.0) * BOTTOM_SHARE
     }
 
@@ -536,6 +548,25 @@ mod tests {
         );
     }
 
+    /// The bias towards the bottom is deliberate but slight: it is there to
+    /// leave the dots room, not to move the icon off centre. Anything much
+    /// stronger reads as a mistake -- on a thin panel a ninth of the leftover
+    /// is a visible couple of pixels, and it gets reported as one.
+    #[test]
+    fn the_icon_sits_only_just_below_centre() {
+        let m = Metrics::default();
+        let leftover = m.panel_height() - m.icon_size();
+        let below = m.icon_bottom_margin();
+        let share = below / leftover;
+
+        assert!(share > 0.5, "the dots need the larger share");
+        assert!(
+            share < 0.53,
+            "a {:.0}% share is an icon that missed the centre, not one making              room for a dot",
+            share * 100.0
+        );
+    }
+
     /// The leftover height splits in the reference's 20:24 proportion at every
     /// icon size, so small artwork does not hang from a fixed top line.
     #[test]
@@ -553,7 +584,7 @@ mod tests {
             share(0.3),
             share(1.0)
         );
-        assert!((share(0.67) - 24.0 / 44.0).abs() < 0.001);
+        assert!((share(0.67) - 43.0 / 84.0).abs() < 0.001);
     }
 
     /// The derived values are what the whole layout hangs off, and they are
