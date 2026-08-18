@@ -7,16 +7,53 @@
 use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, Rect, Transform};
 
 use super::ui::{self, Control};
-use crate::{metrics::Color, render::rounded_rect, text::TextRenderer};
+use crate::{appearance::Appearance, metrics::Color, render::rounded_rect, text::TextRenderer};
 
-const BACKGROUND: Color = Color::rgba(0.14, 0.14, 0.15, 1.0);
-const ROW_HOVER: Color = Color::rgba(1.0, 1.0, 1.0, 0.05);
-const LABEL: Color = Color::rgba(1.0, 1.0, 1.0, 0.92);
-const HEADING: Color = Color::rgba(1.0, 1.0, 1.0, 0.45);
-const VALUE: Color = Color::rgba(1.0, 1.0, 1.0, 0.55);
-const TRACK: Color = Color::rgba(1.0, 1.0, 1.0, 0.16);
-const ACCENT: Color = Color::rgba(0.20, 0.52, 0.94, 1.0);
-const KNOB: Color = Color::rgba(1.0, 1.0, 1.0, 0.95);
+/// The window's colours, in one appearance or the other.
+///
+/// The same two-palette arrangement the dock itself uses: identical weights,
+/// with the ink swapped. A settings window that stayed dark on a light desktop
+/// would be the odd one out among every other window on screen.
+#[derive(Debug, Clone, Copy)]
+pub struct Theme {
+    background: Color,
+    row_hover: Color,
+    label: Color,
+    heading: Color,
+    value: Color,
+    track: Color,
+    accent: Color,
+    knob: Color,
+}
+
+impl Theme {
+    pub const fn for_appearance(appearance: Appearance) -> Self {
+        match appearance {
+            Appearance::Dark => Self {
+                background: Color::rgba(0.14, 0.14, 0.15, 1.0),
+                row_hover: Color::rgba(1.0, 1.0, 1.0, 0.05),
+                label: Color::rgba(1.0, 1.0, 1.0, 0.92),
+                heading: Color::rgba(1.0, 1.0, 1.0, 0.45),
+                value: Color::rgba(1.0, 1.0, 1.0, 0.55),
+                track: Color::rgba(1.0, 1.0, 1.0, 0.16),
+                accent: Color::rgba(0.20, 0.52, 0.94, 1.0),
+                knob: Color::rgba(1.0, 1.0, 1.0, 0.95),
+            },
+            Appearance::Light => Self {
+                background: Color::rgba(0.93, 0.93, 0.94, 1.0),
+                row_hover: Color::rgba(0.0, 0.0, 0.0, 0.05),
+                label: Color::rgba(0.0, 0.0, 0.0, 0.85),
+                heading: Color::rgba(0.0, 0.0, 0.0, 0.45),
+                value: Color::rgba(0.0, 0.0, 0.0, 0.55),
+                track: Color::rgba(0.0, 0.0, 0.0, 0.16),
+                // The accent is the same colour in both, and the knob stays
+                // white on it: that is a control, not a surface.
+                accent: Color::rgba(0.20, 0.52, 0.94, 1.0),
+                knob: Color::rgba(1.0, 1.0, 1.0, 1.0),
+            },
+        }
+    }
+}
 
 const LABEL_SIZE: f32 = 13.0;
 const HEADING_SIZE: f32 = 11.0;
@@ -34,8 +71,9 @@ pub fn draw(
     controls: &[Control],
     width: f32,
     hovered: Option<usize>,
+    theme: &Theme,
 ) {
-    pixmap.fill(BACKGROUND.to_skia());
+    pixmap.fill(theme.background.to_skia());
     let (tops, _) = ui::rows(controls);
 
     for (i, (control, top)) in controls.iter().zip(&tops).enumerate() {
@@ -53,16 +91,16 @@ pub fn draw(
                         ui::HEADING_HEIGHT / 2.0,
                         HEADING_SIZE,
                     ),
-                    HEADING,
+                    theme.heading,
                 );
             }
             Control::Toggle { label, value, .. } => {
                 if hovered == Some(i) {
-                    highlight(pixmap, *top, width);
+                    highlight(pixmap, *top, width, theme);
                 }
-                label_at(pixmap, text, label, *top);
+                label_at(pixmap, text, label, *top, theme);
                 if let Some(rect) = ui::control_rect(control, *top, width) {
-                    toggle(pixmap, rect, *value);
+                    toggle(pixmap, rect, *value, theme);
                 }
             }
             Control::Choice {
@@ -72,11 +110,11 @@ pub fn draw(
                 ..
             } => {
                 if hovered == Some(i) {
-                    highlight(pixmap, *top, width);
+                    highlight(pixmap, *top, width, theme);
                 }
-                label_at(pixmap, text, label, *top);
+                label_at(pixmap, text, label, *top, theme);
                 if let Some(rect) = ui::control_rect(control, *top, width) {
-                    choice(pixmap, text, rect, options, *value);
+                    choice(pixmap, text, rect, options, *value, theme);
                 }
             }
             Control::Slider {
@@ -88,12 +126,12 @@ pub fn draw(
                 ..
             } => {
                 if hovered == Some(i) {
-                    highlight(pixmap, *top, width);
+                    highlight(pixmap, *top, width, theme);
                 }
-                label_at(pixmap, text, label, *top);
+                label_at(pixmap, text, label, *top, theme);
                 if let Some(rect) = ui::control_rect(control, *top, width) {
                     let fraction = ((value - min) / (max - min)).clamp(0.0, 1.0);
-                    slider(pixmap, rect, fraction);
+                    slider(pixmap, rect, fraction, theme);
 
                     // The number goes left of the track, where there is room
                     // whatever the label's length.
@@ -111,7 +149,7 @@ pub fn draw(
                         LABEL_SIZE,
                         rect.0 - w - 12.0,
                         line_top(*top, ui::ROW_HEIGHT, LABEL_SIZE),
-                        VALUE,
+                        theme.value,
                     );
                 }
             }
@@ -130,11 +168,12 @@ fn choice(
     rect: (f32, f32, f32, f32),
     options: &[&str],
     selected: usize,
+    theme: &Theme,
 ) {
     let (x, y, w, h) = rect;
     if let Some(track) = Rect::from_xywh(x, y, w, h) {
         if let Some(path) = rounded_rect(track, 6.0) {
-            fill(pixmap, &path, TRACK);
+            fill(pixmap, &path, theme.track);
         }
     }
 
@@ -145,7 +184,7 @@ fn choice(
             // than as a second track butted against its neighbour.
             if let Some(r) = Rect::from_xywh(sx + 2.0, sy + 2.0, sw - 4.0, sh - 4.0) {
                 if let Some(path) = rounded_rect(r, 4.0) {
-                    fill(pixmap, &path, ACCENT);
+                    fill(pixmap, &path, theme.accent);
                 }
             }
         }
@@ -161,66 +200,70 @@ fn choice(
             LABEL_SIZE,
             sx + (sw - tw) / 2.0,
             line_top(sy, sh, LABEL_SIZE),
-            if i == selected { KNOB } else { LABEL },
+            if i == selected {
+                theme.knob
+            } else {
+                theme.label
+            },
         );
     }
 }
 
-fn label_at(pixmap: &mut Pixmap, text: &mut TextRenderer, label: &str, top: f32) {
+fn label_at(pixmap: &mut Pixmap, text: &mut TextRenderer, label: &str, top: f32, theme: &Theme) {
     text.draw(
         pixmap,
         label,
         LABEL_SIZE,
         ui::PADDING,
         line_top(top, ui::ROW_HEIGHT, LABEL_SIZE),
-        LABEL,
+        theme.label,
     );
 }
 
-fn highlight(pixmap: &mut Pixmap, top: f32, width: f32) {
+fn highlight(pixmap: &mut Pixmap, top: f32, width: f32, theme: &Theme) {
     let Some(rect) = Rect::from_xywh(ui::PADDING / 2.0, top, width - ui::PADDING, ui::ROW_HEIGHT)
     else {
         return;
     };
     if let Some(path) = rounded_rect(rect, 6.0) {
-        fill(pixmap, &path, ROW_HOVER);
+        fill(pixmap, &path, theme.row_hover);
     }
 }
 
-fn toggle(pixmap: &mut Pixmap, (x, y, w, h): (f32, f32, f32, f32), on: bool) {
+fn toggle(pixmap: &mut Pixmap, (x, y, w, h): (f32, f32, f32, f32), on: bool, theme: &Theme) {
     let Some(rect) = Rect::from_xywh(x, y, w, h) else {
         return;
     };
     if let Some(path) = rounded_rect(rect, h / 2.0) {
-        fill(pixmap, &path, if on { ACCENT } else { TRACK });
+        fill(pixmap, &path, if on { theme.accent } else { theme.track });
     }
 
     let r = h / 2.0 - 3.0;
     let cx = if on { x + w - h / 2.0 } else { x + h / 2.0 };
     if let Some(path) = PathBuilder::from_circle(cx, y + h / 2.0, r) {
-        fill(pixmap, &path, KNOB);
+        fill(pixmap, &path, theme.knob);
     }
 }
 
-fn slider(pixmap: &mut Pixmap, (x, y, w, h): (f32, f32, f32, f32), fraction: f32) {
+fn slider(pixmap: &mut Pixmap, (x, y, w, h): (f32, f32, f32, f32), fraction: f32, theme: &Theme) {
     let cy = y + h / 2.0;
     let track_y = cy - ui::TRACK_HEIGHT / 2.0;
 
     if let Some(rect) = Rect::from_xywh(x, track_y, w, ui::TRACK_HEIGHT) {
         if let Some(path) = rounded_rect(rect, ui::TRACK_HEIGHT / 2.0) {
-            fill(pixmap, &path, TRACK);
+            fill(pixmap, &path, theme.track);
         }
     }
     // The filled part shows how far along the range the value sits.
     if fraction > 0.0 {
         if let Some(rect) = Rect::from_xywh(x, track_y, w * fraction, ui::TRACK_HEIGHT) {
             if let Some(path) = rounded_rect(rect, ui::TRACK_HEIGHT / 2.0) {
-                fill(pixmap, &path, ACCENT);
+                fill(pixmap, &path, theme.accent);
             }
         }
     }
     if let Some(path) = PathBuilder::from_circle(x + w * fraction, cy, ui::KNOB_RADIUS) {
-        fill(pixmap, &path, KNOB);
+        fill(pixmap, &path, theme.knob);
     }
 }
 
@@ -238,12 +281,21 @@ mod tests {
     use super::*;
     use crate::config::Config;
 
+    const THEME: Theme = Theme::for_appearance(Appearance::Dark);
+
     fn render() -> Pixmap {
         let controls = ui::controls(&Config::default());
         let (_, h) = ui::rows(&controls);
         let mut pixmap = Pixmap::new(ui::WINDOW_WIDTH as u32, h as u32).unwrap();
         let mut text = TextRenderer::new();
-        draw(&mut pixmap, &mut text, &controls, ui::WINDOW_WIDTH, None);
+        draw(
+            &mut pixmap,
+            &mut text,
+            &controls,
+            ui::WINDOW_WIDTH,
+            None,
+            &THEME,
+        );
         if let Ok(path) = std::env::var("KDOCK_DUMP_SETTINGS") {
             pixmap.save_png(path).unwrap();
         }
@@ -251,7 +303,7 @@ mod tests {
     }
 
     fn is_background(p: tiny_skia::PremultipliedColorU8) -> bool {
-        let bg = BACKGROUND.to_skia().to_color_u8();
+        let bg = THEME.background.to_skia().to_color_u8();
         p.red() == bg.red() && p.green() == bg.green() && p.blue() == bg.blue()
     }
 

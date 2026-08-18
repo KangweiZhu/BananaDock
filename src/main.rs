@@ -1,5 +1,6 @@
 //! A macOS-style dock for Wayland compositors that implement `wlr-layer-shell`.
 
+mod appearance;
 mod config;
 mod drops;
 mod edge;
@@ -58,6 +59,7 @@ use wayland_client::{
     Connection, QueueHandle,
 };
 
+use appearance::Appearance;
 use config::Config;
 use edge::Frame;
 use icons::IconCache;
@@ -166,6 +168,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         layer_shell.create_layer_surface(&qh, surface, Layer::Top, Some("dock"), chosen.as_ref());
     let dock = LayerDock::new(layer, &shm, config.edge(), surface_depth)?;
 
+    // The desktop's light/dark setting, which the dock follows unless the
+    // configuration pins it. Asked once here and then watched for changes, so
+    // a dock started before dusk does not stay dark through the morning.
+    let bus = zbus::blocking::Connection::session().ok();
+    let started_in = config
+        .forced_appearance()
+        .or_else(|| appearance::detect(bus.as_ref()))
+        .unwrap_or_default();
+
     let toplevels = ForeignToplevelManager::new(&globals, &qh);
 
     // The channel carries every out-of-band wake-up: config edits, Trash
@@ -226,7 +237,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         icons: IconCache::new(config.icon_theme.clone()),
         // Capturing goes through KWin's screenshot interface, which rides the
         // same session bus the window fallback uses.
-        thumbnails: thumbnails::ThumbnailCache::new(zbus::blocking::Connection::session().ok()),
+        thumbnails: thumbnails::ThumbnailCache::new(bus.clone()),
         events: tx.clone(),
         visible_slots: Vec::new(),
         departing: Vec::new(),
@@ -241,7 +252,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or(model::TrashState { full: false }),
         trash_dir,
         metrics,
-        palette: Palette::default(),
+        palette: Palette::for_appearance(started_in),
+        appearance: started_in,
         pointer_along: None,
         current_widths: Vec::new(),
         last_frame_ms: None,
@@ -279,6 +291,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // file and on dropped-data pipes, not only on Wayland events.
     WaylandSource::new(conn.clone(), event_queue).insert(event_loop.handle())?;
 
+    {
+        let tx = tx.clone();
+        appearance::watch(bus.clone(), move |now| {
+            let _ = tx.send(Watched::Appearance(now));
+        });
+    }
+
     event_loop
         .handle()
         .insert_source(rx, |event, _, app: &mut App| {
@@ -288,6 +307,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Watched::Trash => app.reload_trash(),
                     Watched::Windows(snapshot) => app.apply_kwin_windows(&snapshot),
                     Watched::Thumbnail(uuid, thumb) => app.apply_thumbnail(uuid, thumb),
+                    Watched::Appearance(now) => app.apply_appearance(now),
                 }
             }
         })
@@ -381,6 +401,8 @@ enum Watched {
     Windows(String),
     /// A window thumbnail finished capturing, or failed to.
     Thumbnail(String, Option<thumbnails::Thumbnail>),
+    /// The desktop switched between its light and dark appearance.
+    Appearance(appearance::Appearance),
 }
 
 /// Watches one file for changes.
@@ -636,6 +658,9 @@ struct App {
     trash_dir: Option<std::path::PathBuf>,
     metrics: Metrics,
     palette: Palette,
+    /// The appearance the desktop last reported, so a configuration that stops
+    /// pinning one can fall back to it without asking the portal again.
+    appearance: Appearance,
 
     /// Pointer position in *resting-layout* coordinates, or `None` when the
     /// pointer is away and the row should collapse.
@@ -720,6 +745,27 @@ impl App {
                 t.id, t.app_id, t.active, t.minimized, t.title
             );
         }
+    }
+
+    /// Repaints in the desktop's new appearance.
+    ///
+    /// Ignored when the configuration pins the dock to one appearance: the
+    /// desktop is still entitled to change its mind, and the dock is still
+    /// entitled to have been told not to care.
+    fn apply_appearance(&mut self, now: Appearance) {
+        if self.config.forced_appearance().is_some() {
+            return;
+        }
+        self.set_appearance(now);
+    }
+
+    fn set_appearance(&mut self, now: Appearance) {
+        if now == self.appearance {
+            return;
+        }
+        self.appearance = now;
+        self.palette = Palette::for_appearance(now);
+        self.draw();
     }
 
     fn apply_thumbnail(&mut self, uuid: String, thumb: Option<thumbnails::Thumbnail>) {
@@ -1166,6 +1212,14 @@ impl App {
 
         if self.config.icon_theme != fresh.icon_theme {
             self.icons = IconCache::new(fresh.icon_theme.clone());
+        }
+        // Pinning the dock to one appearance, or letting go of the pin: either
+        // way the answer is whatever the file now says, falling back to what
+        // the desktop last told us.
+        if self.config.appearance != fresh.appearance {
+            let now = fresh.forced_appearance().unwrap_or(self.appearance);
+            self.appearance = now;
+            self.palette = Palette::for_appearance(now);
         }
         self.pinned = fresh.pinned.clone();
         self.config = fresh;

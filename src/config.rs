@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-use crate::{edge::Edge, metrics::Metrics};
+use crate::{appearance::Appearance, edge::Edge, metrics::Metrics};
 
 /// The XDG config directory, `~/.config` when unset.
 pub fn config_home() -> Option<PathBuf> {
@@ -65,6 +65,9 @@ pub struct Config {
     /// Which screen edge the dock sits on: `bottom`, `top`, `left` or
     /// `right`. Anything else is reported and the bottom is kept.
     pub position: String,
+    /// `system` to follow the desktop's light/dark setting, as macOS does, or
+    /// `light` / `dark` to pin the dock to one of them.
+    pub appearance: String,
     /// Space between the dock and the screen edge it sits on, in points.
     pub bottom_gap: f32,
     /// Space between the dock and the windows above it, in points.
@@ -100,6 +103,7 @@ impl Default for Config {
             panel_radius: 0.5,
             panel_padding: 8.0,
             position: "bottom".into(),
+            appearance: "system".into(),
             bottom_gap: 8.0,
             window_gap: 0.0,
             show_trash: true,
@@ -196,6 +200,26 @@ impl Config {
             );
             Edge::Bottom
         })
+    }
+
+    /// The appearance the dock was told to use, if it was told at all.
+    ///
+    /// `system` -- the default -- answers `None`, which leaves the decision to
+    /// the desktop. An unrecognised spelling is reported and treated the same
+    /// way, since following the desktop is what most people want anyway.
+    pub fn forced_appearance(&self) -> Option<Appearance> {
+        let name = self.appearance.trim();
+        if name.eq_ignore_ascii_case("system") {
+            return None;
+        }
+        let parsed = Appearance::parse(name);
+        if parsed.is_none() {
+            eprintln!(
+                "kdock: {:?} is not an appearance, following the desktop",
+                self.appearance
+            );
+        }
+        parsed
     }
 
     /// Folds the user's preferences into the measured proportions.

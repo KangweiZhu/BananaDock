@@ -80,6 +80,18 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         pointer: None,
         text: TextRenderer::new(),
         path,
+        // The window follows the desktop's appearance the same way the dock
+        // does, and for the same reason: it is an ordinary window among the
+        // user's other ones. Read once at startup -- unlike the dock, this
+        // window is opened, used and closed, so it never sits through a dusk.
+        theme: paint::Theme::for_appearance(
+            config
+                .forced_appearance()
+                .or_else(|| {
+                    crate::appearance::detect(zbus::blocking::Connection::session().ok().as_ref())
+                })
+                .unwrap_or_default(),
+        ),
         config,
         controls,
         width: size.0,
@@ -106,6 +118,7 @@ struct Settings {
     window: Window,
     pointer: Option<wl_pointer::WlPointer>,
     text: TextRenderer,
+    theme: paint::Theme,
 
     path: std::path::PathBuf,
     config: Config,
@@ -216,6 +229,7 @@ impl Settings {
             &self.controls,
             w as f32,
             self.hovered,
+            &self.theme,
         );
 
         let stride = w as i32 * 4;

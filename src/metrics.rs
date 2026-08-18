@@ -13,7 +13,7 @@
 //! ee6971b:qml/Metrics.qml`). The ratios below were reverse-engineered from a
 //! WWDC25 Tahoe press shot; the `[measure]` values were not.
 
-use crate::edge::Edge;
+use crate::{appearance::Appearance, edge::Edge};
 
 /// Sizes are expressed in macOS points. `scale` converts points to the
 /// surface's logical pixels and doubles as the Dock size preference -- macOS
@@ -353,8 +353,53 @@ impl Color {
     }
 }
 
-impl Default for Palette {
-    fn default() -> Self {
+impl Palette {
+    /// The colours for one appearance.
+    ///
+    /// macOS keeps the *proportions* either way round and flips what they are
+    /// made of: the same faint overlay that is white on the dark dock is black
+    /// on the light one, and the running dots go from white to black with it.
+    /// So the two palettes below are deliberately the same numbers with the
+    /// ink swapped, rather than two independently invented sets.
+    pub fn for_appearance(appearance: Appearance) -> Self {
+        match appearance {
+            Appearance::Dark => Self::dark(),
+            Appearance::Light => Self::light(),
+        }
+    }
+
+    /// The light dock: a white material carrying black markings.
+    ///
+    /// The tint is much stronger than the dark palette's. A dark panel gets
+    /// most of its body from the blurred desktop behind it, but the same
+    /// treatment over a bright desktop leaves nothing to tell panel from
+    /// wallpaper, so the light material has to do more of the work itself.
+    pub fn light() -> Self {
+        Self {
+            panel_tint: Color::rgba(1.0, 1.0, 1.0, 0.55),
+            // Dark rather than bright: a white hairline on a white panel is
+            // not a hairline. What defines the edge here is the shadow side.
+            panel_border: Color::rgba(0.0, 0.0, 0.0, 0.12),
+            panel_border_width: 1.0,
+            // [reference] The dots are black in the light appearance, white in
+            // the dark one -- the one piece of dock colour Apple documents.
+            dot: Color::rgba(0.0, 0.0, 0.0, 0.60),
+            separator: Color::rgba(0.0, 0.0, 0.0, 0.20),
+            drop_target: Color::rgba(0.0, 0.0, 0.0, 0.12),
+
+            menu_background: Color::rgba(0.96, 0.96, 0.97, 0.98),
+            menu_border: Color::rgba(0.0, 0.0, 0.0, 0.12),
+            menu_text: Color::rgba(0.0, 0.0, 0.0, 0.85),
+            // The accent and its text stay put: a selected row is the accent
+            // colour with white on it in both appearances.
+            menu_highlight: Color::rgba(0.20, 0.48, 0.95, 1.0),
+            menu_highlight_text: Color::rgba(1.0, 1.0, 1.0, 1.0),
+            menu_separator: Color::rgba(0.0, 0.0, 0.0, 0.12),
+        }
+    }
+
+    /// The dark dock, measured off the reference screenshot.
+    pub fn dark() -> Self {
         Self {
             panel_tint: Color::rgba(1.0, 1.0, 1.0, 0.10),
             panel_border: Color::rgba(1.0, 1.0, 1.0, 0.30),
@@ -373,9 +418,47 @@ impl Default for Palette {
     }
 }
 
+impl Default for Palette {
+    fn default() -> Self {
+        Self::dark()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The two appearances have to differ in the direction macOS documents:
+    /// the running dots are black on the light dock and white on the dark one.
+    /// Getting this backwards is invisible in review and glaring on screen.
+    #[test]
+    fn the_dots_and_the_ink_flip_with_the_appearance() {
+        let dark = Palette::for_appearance(Appearance::Dark);
+        let light = Palette::for_appearance(Appearance::Light);
+
+        assert!(dark.dot.r > 0.5, "dark dock: the dots should be white");
+        assert!(light.dot.r < 0.5, "light dock: the dots should be black");
+        assert!(dark.menu_text.r > 0.5 && dark.menu_background.r < 0.5);
+        assert!(light.menu_text.r < 0.5 && light.menu_background.r > 0.5);
+
+        // The accent is a system colour, not ink: it stays put.
+        assert_eq!(dark.menu_highlight.b, light.menu_highlight.b);
+        assert_eq!(dark.menu_highlight_text.r, light.menu_highlight_text.r);
+    }
+
+    /// A light panel cannot rely on the blurred desktop for its body the way a
+    /// dark one does, so its tint has to carry more of the material itself.
+    #[test]
+    fn the_light_panel_is_more_than_a_faint_veil() {
+        let dark = Palette::for_appearance(Appearance::Dark);
+        let light = Palette::for_appearance(Appearance::Light);
+        assert!(
+            light.panel_tint.a > dark.panel_tint.a * 3.0,
+            "light tint {} is too faint next to dark's {}",
+            light.panel_tint.a,
+            dark.panel_tint.a
+        );
+    }
 
     /// However large the artwork is set, it has to keep breathing room inside
     /// the panel rather than growing through its edges.
