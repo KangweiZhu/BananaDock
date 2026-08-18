@@ -14,14 +14,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # wayland and xkbcommon are needed to build the client bindings;
-      # fontconfig is what the text stack discovers system fonts through, and
-      # the font tests shape real strings, so a font package has to be present.
+      # wayland and xkbcommon are needed to build the client bindings. No
+      # fontconfig headers: fontdb reads fontconfig's configuration files with
+      # a Rust parser rather than linking the C library. What the text tests do
+      # need is a font to find, since they shape real strings.
       - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libwayland-dev libxkbcommon-dev libfontconfig-1-dev fonts-dejavu-core
+            libwayland-dev libxkbcommon-dev fonts-dejavu-core
 
       - uses: dtolnay/rust-toolchain@stable
         with:
