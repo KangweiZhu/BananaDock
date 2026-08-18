@@ -5,6 +5,8 @@
 //! icons grow upwards into the headroom), so the panel is positioned against
 //! the *bottom* of the pixmap rather than the top.
 
+use std::time::Duration;
+
 use tiny_skia::{
     FillRule, FilterQuality, Paint, PathBuilder, Pattern, Pixmap, Rect, SpreadMode, Stroke,
     Transform,
@@ -270,6 +272,17 @@ pub fn draw_dock(
             .filter(|_| slot.kind == SlotKind::MinimizedWindow)
             .and_then(|key| thumbnails.get(key));
 
+        // A picture that has been asked for but has not arrived yet. The tile
+        // is only just growing into the row, and the capture normally lands
+        // before it finishes; standing in with the application's icon would
+        // put a visible swap in the middle of that animation, so the tile
+        // stays empty until either the picture or the deadline arrives.
+        let awaiting = thumbnail.is_none()
+            && slot.kind == SlotKind::MinimizedWindow
+            && slot.capture_key.as_deref().is_some_and(|key| {
+                thumbnails.awaiting(key, Duration::from_millis(metrics.row_change_ms.into()))
+            });
+
         if let Some(thumb) = thumbnail {
             // Fitted inside the icon's box, keeping the window's proportions:
             // stretching a window to a square makes it unrecognisable. A
@@ -296,7 +309,7 @@ pub fn draw_dock(
                     badges.push((rect, name));
                 }
             }
-        } else if let Some(name) = slot.icon_name.as_deref() {
+        } else if let Some(name) = slot.icon_name.as_deref().filter(|_| !awaiting) {
             if let Some(art) = icons.get(name) {
                 draw_icon(
                     pixmap,
@@ -774,6 +787,80 @@ mod tests {
         );
 
         std::fs::remove_file(&icon_path).ok();
+    }
+
+    /// The icon must not stand in for a picture that is on its way: the swap
+    /// a few frames later is the whole thing this avoids. Rendered rather than
+    /// reasoned about, because the fallback is a branch in the draw path.
+    #[test]
+    fn a_tile_waiting_for_its_picture_stays_empty() {
+        /// How much of the icon shows at the centre of the tile's artwork,
+        /// with and without a capture in flight.
+        fn icon_red(pending: bool) -> u8 {
+            let dir = std::env::temp_dir().join("kdock-waiting-test");
+            std::fs::create_dir_all(&dir).unwrap();
+            let icon_path = dir.join("icon.png");
+            let mut art = Pixmap::new(64, 64).unwrap();
+            art.fill(tiny_skia::Color::from_rgba8(255, 0, 0, 255));
+            art.save_png(&icon_path).unwrap();
+
+            let m = Metrics::default();
+            let (lw, lh) = (400.0, m.surface_height());
+            let mut pixmap = Pixmap::new(lw as u32, lh.ceil() as u32).unwrap();
+            let mut icons = IconCache::default();
+            let thumbnails = ThumbnailCache::default();
+            if pending {
+                thumbnails.mark_pending("w");
+            }
+
+            let slots = [Slot {
+                kind: SlotKind::MinimizedWindow,
+                capture_key: Some("w".into()),
+                icon_name: Some(icon_path.to_string_lossy().into_owned()),
+                ..slot(false)
+            }];
+            let geom = crate::layout::layout(
+                &[crate::layout::SlotMetrics {
+                    rest_width: m.pt(m.tile_size),
+                    magnifies: true,
+                }],
+                None,
+                &m,
+            );
+            let panel = draw_dock(
+                Target {
+                    pixmap: &mut pixmap,
+                    logical: (lw, lh),
+                    scale: 1.0,
+                    offset_y: 0.0,
+                },
+                &m,
+                &Palette::default(),
+                Scene {
+                    slots: &slots,
+                    layout: &geom,
+                    icons: &mut icons,
+                    thumbnails: &thumbnails,
+                    drop_target: None,
+                },
+            );
+
+            let icon_px = m.pt(m.tile_size) * m.icon_size_ratio;
+            let cx = panel.x() + m.pt(m.panel_padding_h) + m.pt(m.tile_size) / 2.0;
+            let cy = panel.bottom() - m.pt(m.icon_bottom_margin()) - icon_px / 2.0;
+            std::fs::remove_file(&icon_path).ok();
+            pixmap.pixel(cx as u32, cy as u32).unwrap().red()
+        }
+
+        // Nothing in flight: the icon is all the tile can show, so it shows it.
+        assert!(
+            icon_red(false) > 150,
+            "a tile with no picture coming should fall back to the icon"
+        );
+        assert!(
+            icon_red(true) < 80,
+            "a tile whose picture is on its way should stay empty"
+        );
     }
 
     fn slot(running: bool) -> Slot {

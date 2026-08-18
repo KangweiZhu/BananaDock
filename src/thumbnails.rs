@@ -23,6 +23,7 @@ use std::{
     io::Read,
     os::{fd::AsFd, unix::net::UnixStream},
     sync::{Arc, Mutex},
+    time::{Duration, Instant},
 };
 
 use tiny_skia::{IntSize, Pixmap};
@@ -54,12 +55,22 @@ pub struct Thumbnail {
 #[derive(Default)]
 pub struct ThumbnailCache {
     ready: HashMap<String, Thumbnail>,
-    /// Captures already asked for, so a redraw does not queue the same window
-    /// again while its capture is still in flight.
-    pending: Arc<Mutex<Vec<String>>>,
+    /// Captures already asked for and when, so a redraw does not queue the
+    /// same window again while its capture is still in flight -- and so a tile
+    /// can tell how long it has been waiting for one.
+    pending: Arc<Mutex<Vec<(String, Instant)>>>,
     /// Windows whose capture failed. Retrying every frame would hammer KWin
     /// with a call that is not going to start working.
     failed: Arc<Mutex<Vec<String>>>,
+    /// Whether the last capture came back empty-handed.
+    ///
+    /// A capture fails for one of two reasons: the desktop entry carries no
+    /// `ScreenShot2` grant, in which case none of them will ever work, or the
+    /// window went away mid-capture, which is a one-off. [`Self::awaiting`]
+    /// uses this to decide whether a picture is worth waiting for at all, and
+    /// a later success clears it -- one unlucky window must not write the
+    /// whole route off.
+    route_broken: Arc<Mutex<bool>>,
     connection: Option<zbus::blocking::Connection>,
 }
 
@@ -77,15 +88,55 @@ impl ThumbnailCache {
 
     pub fn insert(&mut self, uuid: String, thumbnail: Thumbnail) {
         if let Ok(mut pending) = self.pending.lock() {
-            pending.retain(|p| *p != uuid);
+            pending.retain(|(p, _)| *p != uuid);
+        }
+        if let Ok(mut broken) = self.route_broken.lock() {
+            *broken = false;
         }
         self.ready.insert(uuid, thumbnail);
+    }
+
+    /// Whether a tile should hold off drawing anything while this window's
+    /// picture is on its way.
+    ///
+    /// A capture takes a handful of frames, which is less than a tile spends
+    /// growing into the row. Standing in with the application's icon for that
+    /// long means the tile visibly swaps one picture for another part-way
+    /// through its own animation, and that swap is what the eye catches -- an
+    /// empty tile that is still opening is not.
+    ///
+    /// So: only while a capture is genuinely running, only for as long as
+    /// `grace`, and only while captures are working at all. Each of those
+    /// failing means the icon is the best the tile is going to get, and it
+    /// should show it right away.
+    pub fn awaiting(&self, uuid: &str, grace: Duration) -> bool {
+        if self.route_broken.lock().map(|b| *b).unwrap_or(true) {
+            return false;
+        }
+        self.pending
+            .lock()
+            .map(|p| {
+                p.iter()
+                    .any(|(key, since)| key == uuid && since.elapsed() < grace)
+            })
+            .unwrap_or(false)
+    }
+
+    /// Marks a capture as in flight, for tests that have no bus to run one on.
+    #[cfg(test)]
+    pub(crate) fn mark_pending(&self, uuid: &str) {
+        if let Ok(mut pending) = self.pending.lock() {
+            pending.push((uuid.to_owned(), Instant::now()));
+        }
     }
 
     /// Records that a capture came back empty-handed.
     pub fn mark_failed(&mut self, uuid: String) {
         if let Ok(mut pending) = self.pending.lock() {
-            pending.retain(|p| *p != uuid);
+            pending.retain(|(p, _)| *p != uuid);
+        }
+        if let Ok(mut broken) = self.route_broken.lock() {
+            *broken = true;
         }
         if let Ok(mut failed) = self.failed.lock() {
             if !failed.contains(&uuid) {
@@ -136,10 +187,10 @@ impl ThumbnailCache {
                 .lock()
                 .map(|f| f.iter().any(|x| x == uuid))
                 .unwrap_or(false);
-            if already_failed || pending.iter().any(|p| p == uuid) {
+            if already_failed || pending.iter().any(|(p, _)| p == uuid) {
                 return;
             }
-            pending.push(uuid.to_owned());
+            pending.push((uuid.to_owned(), Instant::now()));
         }
 
         let uuid = uuid.to_owned();
@@ -278,6 +329,47 @@ fn downscale(src: &Pixmap, max: u32) -> Pixmap {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn a_thumbnail() -> Thumbnail {
+        Thumbnail {
+            pixmap: Arc::new(Pixmap::new(2, 2).unwrap()),
+            aspect: 1.0,
+        }
+    }
+
+    /// A tile holds off drawing while its picture is captured, but only for
+    /// the window it belongs to and only for as long as it is worth waiting.
+    #[test]
+    fn a_tile_waits_only_for_its_own_capture_and_only_briefly() {
+        let grace = Duration::from_millis(200);
+        let cache = ThumbnailCache::default();
+
+        assert!(!cache.awaiting("w", grace), "nothing has been asked for");
+        cache.mark_pending("w");
+        assert!(cache.awaiting("w", grace));
+        assert!(!cache.awaiting("other", grace), "a different window");
+        assert!(
+            !cache.awaiting("w", Duration::ZERO),
+            "a capture that outstays the grace stops holding the tile empty"
+        );
+    }
+
+    /// Without the ScreenShot2 grant every capture fails, and a tile that
+    /// waited each time would sit empty before falling back to the icon on
+    /// every single minimise. One failure is enough to stop waiting.
+    #[test]
+    fn a_broken_capture_route_stops_tiles_waiting() {
+        let grace = Duration::from_millis(200);
+        let mut cache = ThumbnailCache::default();
+        cache.mark_pending("w");
+
+        cache.mark_failed("first".into());
+        assert!(!cache.awaiting("w", grace));
+
+        // ...until one comes back, which proves the route works after all.
+        cache.insert("second".into(), a_thumbnail());
+        assert!(cache.awaiting("w", grace));
+    }
 
     /// KWin's rows are BGRA; getting this wrong swaps red and blue in every
     /// thumbnail, which is obvious on screen but invisible in review.
