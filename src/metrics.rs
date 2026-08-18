@@ -368,18 +368,23 @@ impl Palette {
         }
     }
 
-    /// The light dock: a white material carrying black markings.
+    /// The light dock: the same glass, carrying black markings.
     ///
-    /// The tint is much stronger than the dark palette's. A dark panel gets
-    /// most of its body from the blurred desktop behind it, but the same
-    /// treatment over a bright desktop leaves nothing to tell panel from
-    /// wallpaper, so the light material has to do more of the work itself.
+    /// [reference] Measured off a Tahoe desktop shot in the light appearance,
+    /// on a stretch of wallpaper smooth enough to extrapolate under the panel:
+    /// once the wallpaper's own vertical gradient is taken out, the panel adds
+    /// a white veil of 0.00 to 0.10, averaging about 0.04. The wallpaper's
+    /// structure reads straight through it -- the light dock is very nearly
+    /// clear glass, not the white slab an untested guess makes of it. What
+    /// makes it read as an object is the blur, the bright rim and the shadow,
+    /// not the fill.
     pub fn light() -> Self {
         Self {
-            panel_tint: Color::rgba(1.0, 1.0, 1.0, 0.55),
-            // Dark rather than bright: a white hairline on a white panel is
-            // not a hairline. What defines the edge here is the shadow side.
-            panel_border: Color::rgba(0.0, 0.0, 0.0, 0.12),
+            panel_tint: Color::rgba(1.0, 1.0, 1.0, 0.12),
+            // Still a bright rim, as in the dark appearance: the reference's
+            // edge is a light hairline over a soft outer shadow, and a dark
+            // outline instead would draw the capsule rather than light it.
+            panel_border: Color::rgba(1.0, 1.0, 1.0, 0.45),
             panel_border_width: 1.0,
             // [reference] The dots are black in the light appearance, white in
             // the dark one -- the one piece of dock colour Apple documents.
@@ -446,18 +451,23 @@ mod tests {
         assert_eq!(dark.menu_highlight_text.r, light.menu_highlight_text.r);
     }
 
-    /// A light panel cannot rely on the blurred desktop for its body the way a
-    /// dark one does, so its tint has to carry more of the material itself.
+    /// Both docks are the same glass. The reference's light panel adds a white
+    /// veil of a few percent -- the wallpaper reads through it -- so a light
+    /// palette that turns the panel into a white slab is wrong however good it
+    /// looks in isolation.
     #[test]
-    fn the_light_panel_is_more_than_a_faint_veil() {
-        let dark = Palette::for_appearance(Appearance::Dark);
-        let light = Palette::for_appearance(Appearance::Light);
-        assert!(
-            light.panel_tint.a > dark.panel_tint.a * 3.0,
-            "light tint {} is too faint next to dark's {}",
-            light.panel_tint.a,
-            dark.panel_tint.a
-        );
+    fn neither_panel_is_more_than_a_veil() {
+        for appearance in [Appearance::Dark, Appearance::Light] {
+            let tint = Palette::for_appearance(appearance).panel_tint;
+            assert!(
+                tint.a <= 0.2,
+                "{appearance:?}: a tint of {} is a slab, not glass",
+                tint.a
+            );
+            // ...and it is a *white* veil either way: the glass brightens what
+            // is behind it in both appearances, and only the ink flips.
+            assert!(tint.r > 0.9 && tint.g > 0.9 && tint.b > 0.9);
+        }
     }
 
     /// However large the artwork is set, it has to keep breathing room inside
