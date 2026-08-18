@@ -774,6 +774,12 @@ pub fn draw_panel(
     // Stroking centres the line on the path, so inset by half the width to keep
     // the hairline fully inside the capsule instead of straddling its edge.
     let bw = metrics.pt(palette.panel_border_width);
+    // A width of zero means no rim at all. Passing it to the stroker instead
+    // would draw the thinnest line it can rather than nothing, which is the
+    // one thing a rim of zero must not do.
+    if bw <= 0.0 {
+        return;
+    }
     let inset = bw / 2.0;
     let Some(inner) = Rect::from_xywh(
         panel.x() + inset,
@@ -816,6 +822,33 @@ mod tests {
         assert!((rect.x() - (1000.0 - expected_w) / 2.0).abs() < 0.01);
         // The gap below the panel is preserved.
         assert!((surface_h - rect.bottom() - m.pt(m.panel_bottom_gap)).abs() < 0.01);
+    }
+
+    /// A rim of zero must leave no rim. tiny-skia reads a zero-width stroke as
+    /// "as thin as possible", so without a guard the setting's bottom stop
+    /// would still draw a line -- and the one thing it promises is silence.
+    #[test]
+    fn a_rim_of_zero_draws_nothing() {
+        fn rim_alpha(width: f32) -> u8 {
+            let m = Metrics::default();
+            let palette = Palette {
+                // Only the rim: a tint would paint the same pixels.
+                panel_tint: crate::metrics::Color::rgba(0.0, 0.0, 0.0, 0.0),
+                panel_border_width: width,
+                ..Palette::default()
+            };
+            let mut pixmap = Pixmap::new(200, 100).unwrap();
+            let panel = Rect::from_xywh(20.0, 20.0, 160.0, 60.0).unwrap();
+            draw_panel(&mut pixmap, Transform::identity(), &m, &palette, panel);
+            // The middle of the top edge, where the rim runs.
+            (0..3)
+                .map(|d| pixmap.pixel(100, 20 + d).unwrap().alpha())
+                .max()
+                .unwrap()
+        }
+
+        assert!(rim_alpha(1.0) > 40, "a one-point rim should be drawn");
+        assert_eq!(rim_alpha(0.0), 0, "a rim of zero should not be");
     }
 
     /// A capsule radius must not be clamped away -- panel_radius is exactly half

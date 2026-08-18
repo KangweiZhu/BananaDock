@@ -153,6 +153,16 @@ pub fn controls(config: &Config, appearance: Appearance) -> Vec<Control> {
             unit: "%",
         },
         Control::Slider {
+            key: "border_width",
+            label: "Border width",
+            value: config.effective_border_width(appearance),
+            min: 0.0,
+            // Whole points here; the file takes fractions for anyone who wants
+            // a half-point hairline on a HiDPI screen.
+            max: 4.0,
+            unit: "pt",
+        },
+        Control::Slider {
             key: "panel_radius",
             label: "Corner radius",
             value: config.panel_radius,

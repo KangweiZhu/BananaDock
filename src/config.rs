@@ -72,6 +72,12 @@ pub struct Config {
     /// `system` to follow the desktop's light/dark setting, as macOS does, or
     /// `light` / `dark` to pin the dock to one of them.
     pub appearance: String,
+    /// Width of the panel's rim, in points. 0 leaves it off entirely.
+    ///
+    /// The rim is what makes the capsule an object rather than a patch of
+    /// blur, so it earns more than its one point on a busy wallpaper -- and
+    /// less than that on a plain one.
+    pub border_width: Option<f32>,
     /// How much tint sits over the blurred desktop behind the panel: 0 is
     /// clear glass, 1 a solid slab.
     ///
@@ -116,6 +122,7 @@ impl Default for Config {
             position: "bottom".into(),
             appearance: "system".into(),
             panel_tint: None,
+            border_width: None,
             bottom_gap: 8.0,
             window_gap: 0.0,
             show_trash: true,
@@ -241,10 +248,18 @@ impl Config {
             .clamp(0.0, 1.0)
     }
 
+    /// The rim's width in force, which is the reference's unless it was set.
+    pub fn effective_border_width(&self, appearance: Appearance) -> f32 {
+        self.border_width
+            .unwrap_or_else(|| Palette::for_appearance(appearance).panel_border_width)
+            .clamp(0.0, 8.0)
+    }
+
     /// The palette to draw in, once the user has had their say about it.
     pub fn palette(&self, appearance: Appearance) -> Palette {
         let mut palette = Palette::for_appearance(appearance);
         palette.panel_tint.a = self.effective_panel_tint(appearance);
+        palette.panel_border_width = self.effective_border_width(appearance);
         palette
     }
 
@@ -563,6 +578,31 @@ mod tests {
         assert_eq!(
             set.palette(Appearance::Light).dot,
             Palette::for_appearance(Appearance::Light).dot
+        );
+    }
+
+    /// The rim's width is settable the same way the tint is, and zero has to
+    /// mean *no rim* -- the drawing turns a zero-width stroke into the
+    /// thinnest line it can, so the palette value is the only place that can
+    /// carry the intent.
+    #[test]
+    fn the_rim_can_be_widened_or_taken_away() {
+        let unset = Config::default();
+        assert_eq!(
+            unset.effective_border_width(Appearance::Light),
+            Palette::for_appearance(Appearance::Light).panel_border_width
+        );
+
+        let wide = Config::parse("border_width = 3.0").unwrap();
+        assert_eq!(wide.palette(Appearance::Dark).panel_border_width, 3.0);
+
+        let none = Config::parse("border_width = 0.0").unwrap();
+        assert_eq!(none.palette(Appearance::Dark).panel_border_width, 0.0);
+
+        // ...and it does not drag the rim's colour or anything else with it.
+        assert_eq!(
+            wide.palette(Appearance::Dark).panel_border,
+            Palette::for_appearance(Appearance::Dark).panel_border
         );
     }
 

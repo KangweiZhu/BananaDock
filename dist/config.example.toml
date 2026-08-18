@@ -43,6 +43,11 @@ auto_hide = false
 # out. Raise it for a dock that reads as a panel over a busy wallpaper.
 #panel_tint = 0.12
 
+# Width of the panel's rim, in points; 0 leaves it off. The rim is what makes
+# the capsule an object rather than a patch of blur, so it earns more than its
+# one point on a busy wallpaper -- and less on a plain one.
+#border_width = 1.0
+
 # Panel corner radius as a fraction of its height. 0.5 makes the ends
 # semicircular -- the capsule macOS uses -- and 0 makes it a plain rectangle.
 panel_radius = 0.5
