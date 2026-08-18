@@ -154,6 +154,24 @@ impl Settings {
                 };
                 self.commit_change(key, (!value).into());
             }
+            Hit::Choice(i, picked) => {
+                let Some(Control::Choice {
+                    key,
+                    options,
+                    value,
+                    ..
+                }) = self.controls.get(i).cloned()
+                else {
+                    return;
+                };
+                let Some(chosen) = options.get(picked) else {
+                    return;
+                };
+                if picked == value {
+                    return;
+                }
+                self.commit_change(key, (*chosen).into());
+            }
             Hit::Slider(i, raw) => {
                 let Some(Control::Slider {
                     key, unit, value, ..
@@ -284,6 +302,7 @@ impl PointerHandler for Settings {
             match event.kind {
                 PointerEventKind::Motion { .. } => {
                     let hovered = hit.as_ref().map(|h| match h {
+                        Hit::Choice(i, _) => *i,
                         Hit::Toggle(i) | Hit::Slider(i, _) => *i,
                     });
                     if hovered != self.hovered {

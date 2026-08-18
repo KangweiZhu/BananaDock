@@ -13,6 +13,8 @@
 //! ee6971b:qml/Metrics.qml`). The ratios below were reverse-engineered from a
 //! WWDC25 Tahoe press shot; the `[measure]` values were not.
 
+use crate::edge::Edge;
+
 /// Sizes are expressed in macOS points. `scale` converts points to the
 /// surface's logical pixels and doubles as the Dock size preference -- macOS
 /// exposes the same thing as a slider. This is NOT the HiDPI buffer scale:
@@ -20,6 +22,10 @@
 #[derive(Debug, Clone, Copy)]
 pub struct Metrics {
     pub scale: f32,
+    /// Which screen edge the dock is docked to. Everything below is measured
+    /// along the row and across it, so this is the only thing that decides
+    /// which way those two directions point. See [`crate::edge`].
+    pub edge: Edge,
 
     // -- Icons -----------------------------------------------------------
     /// Layout PITCH -- the centre-to-centre spacing of icons -- not the size of
@@ -124,6 +130,7 @@ impl Default for Metrics {
     fn default() -> Self {
         Self {
             scale: 1.0,
+            edge: Edge::Bottom,
 
             tile_size: 64.0,          // [known] Apple default tile pitch, 64pt
             large_size: 128.0,        // [known] magnified peak pitch, Apple default 128pt
@@ -234,12 +241,14 @@ impl Metrics {
         self.pt(self.panel_height() + self.panel_bottom_gap + self.window_gap.max(0.0))
     }
 
-    /// The surface has to contain the panel, the gap below it, and the headroom
-    /// a fully magnified icon needs as it grows upward past the panel's top
-    /// edge. The surface is deliberately much taller than the panel; the
-    /// surplus is transparent and excluded from the input region so it does not
-    /// swallow clicks meant for the windows underneath.
-    pub fn surface_height(&self) -> f32 {
+    /// How deep the surface reaches in from the screen's edge.
+    ///
+    /// It has to contain the panel, the gap it stands off the edge by, and the
+    /// headroom a fully magnified icon needs as it grows inwards past the
+    /// panel's inner edge. Deliberately much deeper than the panel itself; the
+    /// surplus is transparent and excluded from the input region so it does
+    /// not swallow clicks meant for the windows underneath.
+    pub fn surface_depth(&self) -> f32 {
         let icon_reach = self.icon_bottom_margin() + self.max_icon_size();
         self.pt(self.panel_bottom_gap + self.panel_height().max(icon_reach) + self.bounce_height)
     }
@@ -427,7 +436,7 @@ mod tests {
             icon_reach > m.panel_height(),
             "magnified icon should overflow the panel"
         );
-        assert!(m.surface_height() >= m.pt(icon_reach + m.panel_bottom_gap));
+        assert!(m.surface_depth() >= m.pt(icon_reach + m.panel_bottom_gap));
     }
 
     #[test]

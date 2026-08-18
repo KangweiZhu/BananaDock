@@ -45,9 +45,12 @@ panel_radius = 0.5
 # makes the panel wider than the row of icons it holds.
 panel_padding = 8.0
 
-# Space between the dock and the screen's bottom edge, in points. Moves the
-# dock; maximised windows follow it up, since the space underneath still
-# belongs to the dock.
+# Which screen edge the dock sits on: "bottom", "left", "right" or "top".
+position = "bottom"
+
+# Space between the dock and the screen edge it sits on, in points. Moves the
+# dock; maximised windows follow it, since the space underneath still belongs
+# to the dock.
 bottom_gap = 8.0
 
 # Space between the dock and the windows above it, in points. Moves the

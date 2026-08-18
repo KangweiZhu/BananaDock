@@ -2,6 +2,7 @@
 
 mod config;
 mod drops;
+mod edge;
 mod icons;
 mod launchers;
 mod layout;
@@ -49,7 +50,7 @@ use smithay_client_toolkit::{
     },
     shm::{Shm, ShmHandler},
 };
-use tiny_skia::Pixmap;
+use tiny_skia::{Pixmap, Rect};
 use wayland_client::{
     globals::registry_queue_init,
     protocol::wl_data_device_manager::DndAction,
@@ -58,6 +59,7 @@ use wayland_client::{
 };
 
 use config::Config;
+use edge::Frame;
 use icons::IconCache;
 use launchers::LauncherIndex;
 use layout::{Layout, SlotMetrics};
@@ -130,7 +132,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = config_path.as_deref().map(Config::load).unwrap_or_default();
     let mut metrics = Metrics::default();
     config.apply_to(&mut metrics);
-    let surface_height = metrics.surface_height().ceil() as u32;
+    let surface_depth = metrics.surface_depth().ceil() as u32;
 
     let output_state = OutputState::new(&globals, &qh);
     let surface = compositor.create_surface(&qh);
@@ -162,7 +164,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let layer =
         layer_shell.create_layer_surface(&qh, surface, Layer::Top, Some("dock"), chosen.as_ref());
-    let dock = LayerDock::new(layer, &shm, surface_height)?;
+    let dock = LayerDock::new(layer, &shm, config.edge(), surface_depth)?;
 
     let toplevels = ForeignToplevelManager::new(&globals, &qh);
 
@@ -240,7 +242,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         trash_dir,
         metrics,
         palette: Palette::default(),
-        pointer_surface_x: None,
+        pointer_along: None,
         current_widths: Vec::new(),
         last_frame_ms: None,
         frame_pending: false,
@@ -454,7 +456,7 @@ fn dump_frame(path: &str, width: u32, ids: &[String]) -> Result<(), Box<dyn std:
     }
     let metrics = metrics;
     let palette = Palette::default();
-    let height = metrics.surface_height().ceil() as u32;
+    let height = metrics.surface_depth().ceil() as u32;
 
     let index = LauncherIndex::load();
     let mut icons = IconCache::new(None);
@@ -506,7 +508,7 @@ fn dump_frame(path: &str, width: u32, ids: &[String]) -> Result<(), Box<dyn std:
             pixmap: &mut pixmap,
             logical: (width as f32, height as f32),
             scale,
-            offset_y: 0.0,
+            slide_out: 0.0,
         },
         &metrics,
         &palette,
@@ -574,7 +576,7 @@ fn dump_menu(path: &str) -> Result<(), Box<dyn std::error::Error>> {
             pixmap: &mut pixmap,
             logical: (layout.width, layout.height),
             scale: 1.0,
-            offset_y: 0.0,
+            slide_out: 0.0,
         },
         &metrics,
         &palette,
@@ -641,7 +643,7 @@ struct App {
     /// value would go stale the moment a tile joins or leaves: the row
     /// re-centres, and a magnification bulge computed against the old origin
     /// detaches from the pointer and hangs where the row used to be.
-    pointer_surface_x: Option<f32>,
+    pointer_along: Option<f32>,
     /// Widths actually drawn. Eased toward the target layout rather than
     /// snapped to it, so the row glides instead of jumping between frames.
     current_widths: Vec<f32>,
@@ -881,14 +883,13 @@ impl App {
     /// come and go, and a converted value cached at pointer-event time would
     /// then describe a place the pointer is no longer at.
     fn cursor_rest_x(&self, slots: &[Slot]) -> Option<f32> {
-        self.pointer_surface_x
-            .map(|x| x - self.rest_origin_x(slots))
+        self.pointer_along.map(|x| x - self.rest_origin_x(slots))
     }
 
     fn rest_origin_x(&self, slots: &[Slot]) -> f32 {
         let pad = self.metrics.pt(self.metrics.panel_padding_h);
         let rest_content: f32 = self.slot_metrics(slots).iter().map(|s| s.rest_width).sum();
-        layout::rest_origin_x(self.dock.width as f32, rest_content, pad)
+        layout::rest_origin_x(self.row_frame().length(), rest_content, pad)
     }
 
     /// Positions for the widths currently drawn, accounting for a drag.
@@ -1049,13 +1050,13 @@ impl App {
             }
         }
 
-        let offset_y = (1.0 - self.revealed) * self.hide_distance();
+        let slide_out = (1.0 - self.revealed) * self.hide_distance();
         let panel = render::draw_dock(
             render::Target {
                 pixmap: &mut pixmap,
                 logical: (w as f32, h as f32),
                 scale: self.scale.scale(),
-                offset_y,
+                slide_out,
             },
             &self.metrics,
             &self.palette,
@@ -1082,28 +1083,35 @@ impl App {
         // transparent to the windows underneath. Once the panel has slid far
         // enough out, all that is left is a sliver along the screen edge to
         // catch the pointer that asks for it back.
-        let region = if self.drag.is_some() {
+        let frame = self.row_frame();
+        let rect = if self.drag.is_some() {
             // A drag has to be able to leave the panel -- that gesture is how
             // an icon is removed -- and the pointer stops being ours the moment
             // it crosses outside the input region.
-            (0, 0, w as i32, h as i32)
+            Rect::from_xywh(0.0, 0.0, w as f32, h as f32)
         } else if self.revealed < 0.5 {
-            let strip = TRIGGER_STRIP_PX;
-            (
-                panel.x().round() as i32,
-                (h as f32 - strip).round() as i32,
-                panel.width().round() as i32,
-                strip as i32,
+            // Hidden: all that is left is a sliver right against the screen's
+            // edge, no wider than the panel it brings back.
+            frame.rect(
+                frame.along_start_of(panel),
+                0.0,
+                frame.along_len_of(panel),
+                TRIGGER_STRIP_PX,
             )
         } else {
-            (
-                panel.x().round() as i32,
-                panel.y().round() as i32,
-                panel.width().round() as i32,
-                panel.height().round() as i32,
-            )
+            Some(panel)
         };
-        self.dock.set_input_region(&self.compositor, &[region]);
+        if let Some(r) = rect {
+            self.dock.set_input_region(
+                &self.compositor,
+                &[(
+                    r.x().round() as i32,
+                    r.y().round() as i32,
+                    r.width().round() as i32,
+                    r.height().round() as i32,
+                )],
+            );
+        }
 
         self.publish_icon_rects();
         self.set_blur(panel);
@@ -1134,9 +1142,15 @@ impl App {
         // A different tile size changes how tall the surface has to be, and the
         // compositor has to be told before the next frame is drawn at the new
         // size.
-        let old_height = self.metrics.surface_height().ceil() as u32;
+        let was = (
+            self.metrics.edge,
+            self.metrics.surface_depth().ceil() as u32,
+        );
         fresh.apply_to(&mut self.metrics);
-        let new_height = self.metrics.surface_height().ceil() as u32;
+        let now = (
+            self.metrics.edge,
+            self.metrics.surface_depth().ceil() as u32,
+        );
 
         if self.config.icon_theme != fresh.icon_theme {
             self.icons = IconCache::new(fresh.icon_theme.clone());
@@ -1144,9 +1158,17 @@ impl App {
         self.pinned = fresh.pinned.clone();
         self.config = fresh;
 
-        if new_height != old_height {
-            self.dock.layer().set_size(0, new_height);
-            self.dock.height = new_height;
+        if now != was {
+            // Moving to another edge re-anchors the surface, which the
+            // compositor answers with a fresh configure carrying the size it
+            // has decided on -- so the row's own extent is not ours to set.
+            self.dock.reanchor(now.0, now.1);
+            if now.0 != was.0 {
+                // The length along the old edge means nothing on the new one;
+                // leave it for the configure rather than laying the row out
+                // against a stale number.
+                self.reset_row();
+            }
         }
         // Slot count or sizes may both have moved; re-derive rather than ease.
         self.reset_row();
@@ -1196,29 +1218,32 @@ impl App {
     fn open_dock_menu(&mut self, serial: u32, qh: &QueueHandle<Self>) {
         let items = menu::build_dock_menu(self.config.magnification, self.config.auto_hide);
         // Anchored to the pointer, since there is no tile it belongs to.
-        let x = self
-            .pointer_surface_x
-            .unwrap_or(self.dock.width as f32 / 2.0)
-            .round() as i32;
-        let anchor = (
-            x,
-            self.panel_top().round() as i32,
-            1,
-            self.panel_height_px(),
-        );
+        let along = self
+            .pointer_along
+            .unwrap_or(self.row_frame().length() / 2.0);
+        let anchor = self.anchor_rect(along, 1.0);
         // `usize::MAX` marks "not a slot": the dock menu's actions never look
         // one up, and a real index would let one of them act on a tile.
         self.present_menu(items, anchor, usize::MAX, serial, qh);
     }
 
-    fn panel_top(&self) -> f32 {
-        self.dock.height as f32
-            - self.metrics.pt(self.metrics.panel_bottom_gap)
-            - self.metrics.pt(self.metrics.panel_height())
-    }
-
-    fn panel_height_px(&self) -> i32 {
-        self.metrics.pt(self.metrics.panel_height()).round() as i32
+    /// The rectangle a menu is anchored to: a stretch of the row, as deep as
+    /// the panel. The popup's own gravity then decides which way it opens.
+    fn anchor_rect(&self, along: f32, len: f32) -> (i32, i32, i32, i32) {
+        let rect = self.row_frame().rect(
+            along,
+            self.metrics.pt(self.metrics.panel_bottom_gap),
+            len.max(1.0),
+            self.metrics.pt(self.metrics.panel_height()),
+        );
+        rect.map_or((0, 0, 1, 1), |r| {
+            (
+                r.x().round() as i32,
+                r.y().round() as i32,
+                r.width().round().max(1.0) as i32,
+                r.height().round().max(1.0) as i32,
+            )
+        })
     }
 
     /// Puts a built menu on screen, anchored to a rectangle in surface
@@ -1250,6 +1275,7 @@ impl App {
             qh,
             anchor,
             (layout.width.ceil() as u32, layout.height.ceil() as u32),
+            self.metrics.edge,
             index,
             self.seat.as_ref().map(|seat| (seat, serial)),
         ) {
@@ -1294,13 +1320,7 @@ impl App {
         let Some(geom) = geometry.slots.get(index).copied() else {
             return;
         };
-        let row_x = self.row_origin_x();
-        let anchor = (
-            (row_x + geom.x).round() as i32,
-            self.panel_top().round() as i32,
-            geom.width.round() as i32,
-            self.panel_height_px(),
-        );
+        let anchor = self.anchor_rect(self.row_origin() + geom.x, geom.width);
         self.present_menu(items, anchor, index, serial, qh);
     }
 
@@ -1385,7 +1405,7 @@ impl App {
                 pixmap: &mut pixmap,
                 logical: (w as f32, h as f32),
                 scale,
-                offset_y: 0.0,
+                slide_out: 0.0,
             },
             &self.metrics,
             &self.palette,
@@ -1505,7 +1525,9 @@ impl App {
         );
 
         let surface = self.dock.layer().wl_surface();
-        let logical_h = self.metrics.surface_height();
+        let frame = self.row_frame();
+        let gap = self.metrics.pt(self.metrics.panel_bottom_gap);
+        let thick = self.metrics.pt(self.metrics.panel_height());
 
         for target in targets {
             // Each window gets the row as it would be with *that* window
@@ -1516,22 +1538,24 @@ impl App {
                 continue;
             };
 
-            let panel = render::panel_rect(
-                width as f32,
-                logical_h,
-                &self.metrics,
-                geometry.content_width,
-            );
-            let row_x = panel.x() + self.metrics.pt(self.metrics.panel_padding_h);
+            let panel = render::panel_rect(&frame, &self.metrics, geometry.content_width, 0.0);
+            let row_along =
+                frame.along_start_of(panel) + self.metrics.pt(self.metrics.panel_padding_h);
 
+            // The tile as it will sit once the row has settled: the window's
+            // minimise animation is aimed at this, so it has to be the tile's
+            // real place on the surface, not the row's own coordinates.
+            let Some(tile) = frame.rect(row_along + geom.x, gap, geom.width, thick) else {
+                continue;
+            };
             self.windows().set_icon_rect(
                 target.window,
                 surface,
                 (
-                    (row_x + geom.x).round() as i32,
-                    panel.y().round() as i32,
-                    geom.width.round() as i32,
-                    panel.height().round() as i32,
+                    tile.x().round() as i32,
+                    tile.y().round() as i32,
+                    tile.width().round() as i32,
+                    tile.height().round() as i32,
                 ),
             );
         }
@@ -1617,8 +1641,20 @@ impl App {
         }
     }
 
-    /// Left edge of the row as currently drawn.
-    fn row_origin_x(&self) -> f32 {
+    /// The row's coordinate frame over the surface as currently configured.
+    ///
+    /// Everything the pointer and the layout speak is one-dimensional -- how
+    /// far down the row, how far in from the screen's edge -- and this is what
+    /// turns that into the surface's own x and y. See [`crate::edge`].
+    fn row_frame(&self) -> Frame {
+        Frame::new(
+            self.metrics.edge,
+            (self.dock.width as f32, self.dock.height as f32),
+        )
+    }
+
+    /// Where the row starts, measured down the row, as currently drawn.
+    fn row_origin(&self) -> f32 {
         let pad = self.metrics.pt(self.metrics.panel_padding_h);
         let content: f32 = self.current_widths.iter().sum();
         let content = if content > 0.0 {
@@ -1626,17 +1662,21 @@ impl App {
         } else {
             self.metrics.pt(self.metrics.tile_size)
         };
-        ((self.dock.width as f32 - (content + pad * 2.0)) / 2.0).max(0.0) + pad
+        ((self.row_frame().length() - (content + pad * 2.0)) / 2.0).max(0.0) + pad
     }
 
-    fn slot_at(&self, surface_x: f32) -> Option<usize> {
-        self.geometry().hit(surface_x - self.row_origin_x())
+    fn slot_at(&self, along: f32) -> Option<usize> {
+        self.geometry().hit(along - self.row_origin())
     }
 
     /// Promotes a press into a drag once it has moved, and tracks it after.
-    fn update_drag(&mut self, surface_x: f32, surface_y: f32, slots: &[Slot]) {
+    ///
+    /// `along` is how far down the row the pointer is, `across` how far in
+    /// from the screen's edge -- the row's own terms, so a dock on any edge
+    /// drags the same way.
+    fn update_drag(&mut self, along: f32, across: f32, slots: &[Slot]) {
         if let Some(candidate) = self.drag_candidate.clone() {
-            if (surface_x - candidate.start_x).abs() < DRAG_THRESHOLD_PX {
+            if (along - candidate.start_x).abs() < DRAG_THRESHOLD_PX {
                 return;
             }
             let Some(slot) = slots.get(candidate.slot) else {
@@ -1650,7 +1690,7 @@ impl App {
             self.drag = Some(Drag {
                 slot: candidate.slot,
                 key: slot.key.clone(),
-                pointer_x: surface_x - self.row_origin_x(),
+                pointer_x: along - self.row_origin(),
                 insert: candidate.slot,
                 outside: false,
             });
@@ -1662,14 +1702,16 @@ impl App {
         let Some(from) = self.drag.as_ref().map(|d| d.slot) else {
             return;
         };
-        let pointer_x = surface_x - self.row_origin_x();
+        let pointer_x = along - self.row_origin();
         let insert = layout::insert_index(&self.slot_metrics(slots), from, pointer_x);
 
         // Dragged clear of the panel: releasing here unpins rather than moves.
-        let panel_top = self.dock.height as f32
-            - self.metrics.pt(self.metrics.panel_bottom_gap)
-            - self.metrics.pt(self.metrics.panel_height());
-        let outside = surface_y < panel_top - self.metrics.pt(self.metrics.tile_size);
+        // Measured inwards from the screen's edge, so "clear of it" is a tile's
+        // worth past the panel's inner face whichever edge the dock is on.
+        let panel_far = self
+            .metrics
+            .pt(self.metrics.panel_bottom_gap + self.metrics.panel_height());
+        let outside = across > panel_far + self.metrics.pt(self.metrics.tile_size);
 
         if let Some(drag) = self.drag.as_mut() {
             drag.pointer_x = pointer_x;
@@ -2210,6 +2252,7 @@ impl PointerHandler for App {
         let mut right_clicked = None;
         let mut menu_choice = None;
         let mut menu_redraw = false;
+        let frame = self.row_frame();
 
         for event in events {
             // Events for the menu's own surface drive the menu, not the dock.
@@ -2261,7 +2304,9 @@ impl PointerHandler for App {
             match event.kind {
                 PointerEventKind::Enter { .. } | PointerEventKind::Motion { .. } => {
                     let slots = self.slots();
-                    if self.pointer_surface_x.is_none() {
+                    let along = frame.along_of(event.position.0 as f32, event.position.1 as f32);
+                    let across = frame.across_of(event.position.0 as f32, event.position.1 as f32);
+                    if self.pointer_along.is_none() {
                         // Armed on entry, not when the menu opens: `on_demand`
                         // grants focus on a *click*, and by the time a click is
                         // being handled it is too late to have influenced it.
@@ -2270,9 +2315,9 @@ impl PointerHandler for App {
                         // away when clicked outside.
                         self.set_keyboard_focusable(true);
                     }
-                    self.pointer_surface_x = Some(event.position.0 as f32);
+                    self.pointer_along = Some(along);
                     self.left_at = None;
-                    self.update_drag(event.position.0 as f32, event.position.1 as f32, &slots);
+                    self.update_drag(along, across, &slots);
                     changed = true;
                 }
                 PointerEventKind::Leave { .. } => {
@@ -2281,7 +2326,7 @@ impl PointerHandler for App {
                     if self.open_menu.is_none() {
                         self.set_keyboard_focusable(false);
                     }
-                    self.pointer_surface_x = None;
+                    self.pointer_along = None;
                     self.left_at = Some(Instant::now());
                     changed = true;
                 }
@@ -2302,13 +2347,12 @@ impl PointerHandler for App {
                     serial,
                     ..
                 } => {
-                    self.drag_candidate =
-                        self.slot_at(event.position.0 as f32)
-                            .map(|slot| DragCandidate {
-                                slot,
-                                start_x: event.position.0 as f32,
-                                serial,
-                            });
+                    let along = frame.along_of(event.position.0 as f32, event.position.1 as f32);
+                    self.drag_candidate = self.slot_at(along).map(|slot| DragCandidate {
+                        slot,
+                        start_x: along,
+                        serial,
+                    });
                 }
                 PointerEventKind::Press {
                     button: 0x111,
@@ -2320,7 +2364,8 @@ impl PointerHandler for App {
                     // this the only way in is the separator, which disappears
                     // when there is nothing on both sides of it -- taking the
                     // one route to Quit with it.
-                    right_clicked = Some((self.slot_at(event.position.0 as f32), serial));
+                    let along = frame.along_of(event.position.0 as f32, event.position.1 as f32);
+                    right_clicked = Some((self.slot_at(along), serial));
                 }
                 _ => {}
             }

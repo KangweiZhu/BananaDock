@@ -12,6 +12,9 @@
 
 use crate::config::Config;
 
+/// The edges a dock can sit on, in the order the choice shows them.
+const EDGES: &[&str] = &["bottom", "left", "right", "top"];
+
 /// Chrome of the settings window, in logical pixels.
 pub const PADDING: f32 = 20.0;
 pub const ROW_HEIGHT: f32 = 40.0;
@@ -21,6 +24,10 @@ pub const TRACK_HEIGHT: f32 = 4.0;
 pub const KNOB_RADIUS: f32 = 8.0;
 pub const TOGGLE_WIDTH: f32 = 40.0;
 pub const TOGGLE_HEIGHT: f32 = 22.0;
+/// A choice needs room for every option at once, so it is wider than the
+/// other controls' right-hand column.
+pub const CHOICE_WIDTH: f32 = 240.0;
+pub const CHOICE_HEIGHT: f32 = 24.0;
 pub const WINDOW_WIDTH: f32 = 460.0;
 
 /// One line in the window.
@@ -40,6 +47,18 @@ pub enum Control {
         max: f32,
         /// Shown after the number, e.g. `pt`.
         unit: &'static str,
+    },
+    /// One of a handful of named settings, shown side by side.
+    ///
+    /// A slider cannot say "left", and four separate toggles would let the
+    /// user pick two edges at once -- a state the dock has no meaning for.
+    Choice {
+        key: &'static str,
+        label: &'static str,
+        /// What is written to the file, in the order they are shown.
+        options: &'static [&'static str],
+        /// Index into `options`; past its end means nothing is selected.
+        value: usize,
     },
 }
 
@@ -103,6 +122,15 @@ pub fn controls(config: &Config) -> Vec<Control> {
             unit: "tiles",
         },
         Control::Heading("Panel"),
+        Control::Choice {
+            key: "position",
+            label: "Position",
+            options: EDGES,
+            value: EDGES
+                .iter()
+                .position(|e| *e == config.edge().name())
+                .unwrap_or(0),
+        },
         Control::Slider {
             key: "panel_height",
             label: "Height",
@@ -193,7 +221,20 @@ pub fn control_rect(control: &Control, top: f32, width: f32) -> Option<(f32, f32
             TRACK_WIDTH,
             KNOB_RADIUS * 2.0,
         )),
+        Control::Choice { .. } => Some((
+            width - PADDING - CHOICE_WIDTH,
+            top + (ROW_HEIGHT - CHOICE_HEIGHT) / 2.0,
+            CHOICE_WIDTH,
+            CHOICE_HEIGHT,
+        )),
     }
+}
+
+/// Where one option of a choice sits inside its control.
+pub fn choice_segment(rect: (f32, f32, f32, f32), count: usize, i: usize) -> (f32, f32, f32, f32) {
+    let (x, y, w, h) = rect;
+    let each = w / count.max(1) as f32;
+    (x + each * i as f32, y, each, h)
 }
 
 /// What a press at a point means.
@@ -203,6 +244,8 @@ pub enum Hit {
     Toggle(usize),
     /// Drag a slider; carries the value the pointer lands on.
     Slider(usize, f32),
+    /// Pick one option of a choice; carries which one.
+    Choice(usize, usize),
 }
 
 /// Finds the control under a point.
@@ -227,6 +270,17 @@ pub fn hit(controls: &[Control], width: f32, x: f32, y: f32) -> Option<Hit> {
                 let (tx, _, tw, _) = control_rect(control, *top, width)?;
                 let fraction = ((x - tx) / tw).clamp(0.0, 1.0);
                 return Some(Hit::Slider(i, min + (max - min) * fraction));
+            }
+            Control::Choice { options, .. } => {
+                // Only the control itself, not the whole row: a choice has no
+                // "flip it" reading, so a click on the label means nothing.
+                let (cx, _, cw, _) = control_rect(control, *top, width)?;
+                if x < cx || x >= cx + cw {
+                    return None;
+                }
+                let n = options.len().max(1);
+                let picked = (((x - cx) / cw) * n as f32) as usize;
+                return Some(Hit::Choice(i, picked.min(n - 1)));
             }
         }
     }
@@ -266,6 +320,9 @@ mod tests {
                 Control::Heading(_) => {}
                 Control::Toggle { key, .. } => doc.push_str(&format!("{key} = true\n")),
                 Control::Slider { key, min, .. } => doc.push_str(&format!("{key} = {min:?}\n")),
+                Control::Choice { key, options, .. } => {
+                    doc.push_str(&format!("{key} = {:?}\n", options[0]))
+                }
             }
         }
         Config::parse(&doc).expect("a control names a field the config does not have");
@@ -315,7 +372,9 @@ mod tests {
             .iter()
             .position(|c| match c {
                 Control::Heading(_) => false,
-                Control::Toggle { key, .. } | Control::Slider { key, .. } => *key == wanted,
+                Control::Toggle { key, .. }
+                | Control::Slider { key, .. }
+                | Control::Choice { key, .. } => *key == wanted,
             })
             .unwrap_or_else(|| panic!("no control for {wanted}"))
     }
@@ -332,6 +391,37 @@ mod tests {
         let b = controls(&wide);
         let icon = index_of(&a, "icon_size");
         assert_eq!(a[icon], b[index_of(&b, "icon_size")]);
+    }
+
+    /// A choice is picked by the segment under the pointer, so every option
+    /// has to be reachable and the label beside them must not swallow clicks.
+    #[test]
+    fn a_choice_picks_the_option_under_the_pointer() {
+        let controls = sliders_and_toggles();
+        let (tops, _) = rows(&controls);
+        let i = index_of(&controls, "position");
+        let top = tops[i];
+        let y = top + ROW_HEIGHT / 2.0;
+        let (cx, _, cw, _) = control_rect(&controls[i], top, WINDOW_WIDTH).unwrap();
+        let Control::Choice { options, .. } = controls[i] else {
+            panic!("position should be a choice")
+        };
+
+        for (n, _) in options.iter().enumerate() {
+            let centre = cx + cw * (n as f32 + 0.5) / options.len() as f32;
+            assert_eq!(
+                hit(&controls, WINDOW_WIDTH, centre, y),
+                Some(Hit::Choice(i, n)),
+                "option {n} is not reachable"
+            );
+        }
+        // The far right edge belongs to the last option, not to one past it.
+        assert_eq!(
+            hit(&controls, WINDOW_WIDTH, cx + cw - 0.5, y),
+            Some(Hit::Choice(i, options.len() - 1))
+        );
+        // ...and the label does nothing, unlike a toggle's row.
+        assert_eq!(hit(&controls, WINDOW_WIDTH, PADDING, y), None);
     }
 
     #[test]

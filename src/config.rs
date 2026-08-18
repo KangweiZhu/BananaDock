@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-use crate::metrics::Metrics;
+use crate::{edge::Edge, metrics::Metrics};
 
 /// The XDG config directory, `~/.config` when unset.
 pub fn config_home() -> Option<PathBuf> {
@@ -62,7 +62,10 @@ pub struct Config {
     /// Space between the end icons and the panel's edges, in points. This is
     /// what makes the panel wider than the row it holds.
     pub panel_padding: f32,
-    /// Space between the dock and the screen's bottom edge, in points.
+    /// Which screen edge the dock sits on: `bottom`, `top`, `left` or
+    /// `right`. Anything else is reported and the bottom is kept.
+    pub position: String,
+    /// Space between the dock and the screen edge it sits on, in points.
     pub bottom_gap: f32,
     /// Space between the dock and the windows above it, in points.
     ///
@@ -96,6 +99,7 @@ impl Default for Config {
             auto_hide: false,
             panel_radius: 0.5,
             panel_padding: 8.0,
+            position: "bottom".into(),
             bottom_gap: 8.0,
             window_gap: 0.0,
             show_trash: true,
@@ -181,6 +185,19 @@ impl Config {
             .max(0.0)
     }
 
+    /// The edge the dock sits on. A spelling nobody recognises keeps the
+    /// bottom rather than refusing the whole file, which would take every
+    /// other setting down with it.
+    pub fn edge(&self) -> Edge {
+        Edge::parse(&self.position).unwrap_or_else(|| {
+            eprintln!(
+                "kdock: {:?} is not a dock position, using the bottom",
+                self.position
+            );
+            Edge::Bottom
+        })
+    }
+
     /// Folds the user's preferences into the measured proportions.
     pub fn apply_to(&self, metrics: &mut Metrics) {
         // The pitch is derived, not set: the icon plus the gap beside it.
@@ -201,6 +218,7 @@ impl Config {
         // clamps anyway -- rejecting it here keeps the config honest.
         metrics.panel_radius_ratio = self.panel_radius.clamp(0.0, 0.5);
         metrics.panel_padding_h = self.panel_padding.max(0.0);
+        metrics.edge = self.edge();
         metrics.panel_bottom_gap = self.bottom_gap.max(0.0);
         metrics.window_gap = self.window_gap.max(0.0);
     }

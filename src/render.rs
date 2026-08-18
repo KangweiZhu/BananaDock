@@ -13,6 +13,7 @@ use tiny_skia::{
 };
 
 use crate::{
+    edge::Frame,
     icons::IconCache,
     layout::Layout,
     menu::{MenuItem, MenuLayout},
@@ -30,9 +31,9 @@ pub struct Target<'a> {
     pub pixmap: &'a mut Pixmap,
     pub logical: (f32, f32),
     pub scale: f32,
-    /// How far down the panel is pushed for the auto-hide slide, in logical
-    /// pixels. Zero when fully revealed.
-    pub offset_y: f32,
+    /// How far the panel is pushed out through the screen's edge for the
+    /// auto-hide slide, in logical pixels. Zero when fully revealed.
+    pub slide_out: f32,
 }
 
 /// What to draw: the row itself and everything needed to paint it.
@@ -47,15 +48,19 @@ pub struct Scene<'a> {
 
 /// Where the panel sits inside the surface.
 ///
-/// The panel is centred horizontally and pinned to the bottom edge, leaving
-/// `panel_bottom_gap` between it and the screen edge.
-pub fn panel_rect(surface_w: f32, surface_h: f32, metrics: &Metrics, content_w: f32) -> Rect {
-    let w = content_w + metrics.pt(metrics.panel_padding_h) * 2.0;
-    let h = metrics.pt(metrics.panel_height());
-    let x = ((surface_w - w) / 2.0).max(0.0);
-    let y = surface_h - metrics.pt(metrics.panel_bottom_gap) - h;
+/// Centred along whichever edge the dock is on, and standing
+/// `panel_bottom_gap` clear of it. `slide_out` pushes it back out through that
+/// edge for the auto-hide animation, which is a pure translation -- the panel
+/// keeps its shape, so the input region can follow the same rectangle.
+pub fn panel_rect(frame: &Frame, metrics: &Metrics, content_len: f32, slide_out: f32) -> Rect {
+    let len = content_len + metrics.pt(metrics.panel_padding_h) * 2.0;
+    let thick = metrics.pt(metrics.panel_height());
+    let along = ((frame.length() - len) / 2.0).max(0.0);
+    let across = metrics.pt(metrics.panel_bottom_gap) - slide_out;
 
-    Rect::from_xywh(x, y, w, h).expect("panel rect is non-degenerate")
+    frame
+        .rect(along, across, len, thick)
+        .expect("panel rect is non-degenerate")
 }
 
 /// A rounded rectangle. With `radius == height / 2` this is a capsule: the end
@@ -187,7 +192,7 @@ pub fn draw_dock(
         pixmap,
         logical,
         scale,
-        offset_y,
+        slide_out,
     } = target;
     let Scene {
         slots,
@@ -205,38 +210,35 @@ pub fn draw_dock(
     } else {
         metrics.pt(metrics.tile_size)
     };
-    let panel = panel_rect(logical.0, logical.1, metrics, content_w);
-    // Sliding out is a pure translation: the panel keeps its shape and simply
-    // leaves the screen, so the input region can follow the same rectangle.
-    let panel = Rect::from_xywh(
-        panel.x(),
-        panel.y() + offset_y,
-        panel.width(),
-        panel.height(),
-    )
-    .unwrap_or(panel);
+    let frame = Frame::new(metrics.edge, logical);
+    let panel = panel_rect(&frame, metrics, content_w, slide_out);
     draw_panel(pixmap, t, metrics, palette, panel);
 
-    let row_x = panel.x() + metrics.pt(metrics.panel_padding_h);
-    // The dot sits against the panel, not against the icon, so it stays put
-    // while the icon above it grows.
-    let dot_row = panel.bottom();
+    // From here on everything is placed in the row's own terms: `along` runs
+    // down the row and `across` measures in from the screen's edge, so the
+    // same arithmetic serves a dock on any edge.
+    let row_along = frame.along_start_of(panel) + metrics.pt(metrics.panel_padding_h);
+    // The panel's near side -- the one against the screen's edge. Icons and
+    // dots are placed off this rather than off the panel's far side, so they
+    // stay put while the panel's thickness changes around them.
+    let panel_near = frame.near_of(panel);
+    let panel_thick = metrics.pt(metrics.panel_height());
 
     // Application badges for minimised windows, drawn once the whole row is
     // down. See where they are pushed for why they cannot go in as they come.
     let mut badges: Vec<(Rect, &str)> = Vec::new();
 
     for (i, (slot, geom)) in slots.iter().zip(&layout.slots).enumerate() {
-        let centre_x = row_x + geom.centre();
+        let centre_along = row_along + geom.centre();
 
         // A drag hovering this tile: show where the files would land.
         if drop_target == Some(i) && slot.kind != SlotKind::Separator {
             let pad = geom.width * 0.08;
-            if let Some(rect) = Rect::from_xywh(
-                row_x + geom.x + pad,
-                panel.y() + pad,
+            if let Some(rect) = frame.rect(
+                row_along + geom.x + pad,
+                panel_near + pad,
                 geom.width - pad * 2.0,
-                panel.height() - pad * 2.0,
+                panel_thick - pad * 2.0,
             ) {
                 if let Some(path) = rounded_rect(rect, metrics.pt(metrics.menu_highlight_radius)) {
                     let mut paint = Paint {
@@ -250,7 +252,16 @@ pub fn draw_dock(
         }
 
         if slot.kind == SlotKind::Separator {
-            draw_separator(pixmap, t, metrics, palette, centre_x, panel);
+            draw_separator(
+                pixmap,
+                t,
+                &frame,
+                metrics,
+                palette,
+                centre_along,
+                panel_near,
+                panel_thick,
+            );
             continue;
         }
 
@@ -258,10 +269,11 @@ pub fn draw_dock(
         // so magnifying the slot magnifies the icon with it.
         let icon_px = geom.width * metrics.icon_size_ratio;
 
-        // Icons are bottom-aligned and grow upwards when magnified, as on macOS.
-        // The launch bounce lifts the artwork only -- the dot stays on the
-        // panel, as it does on macOS.
-        let icon_bottom = panel.bottom() - metrics.pt(metrics.icon_bottom_margin()) - geom.lift;
+        // The artwork stands off the screen's edge by a fixed margin and grows
+        // *inwards* when magnified, as on macOS. The launch bounce lifts the
+        // artwork only -- the dot stays on the panel, as it does there too.
+        let icon_near = panel_near + metrics.pt(metrics.icon_bottom_margin()) + geom.lift;
+        let icon_box = frame.rect(centre_along - icon_px / 2.0, icon_near, icon_px, icon_px);
 
         // A minimised window shows the window, not its application's icon --
         // that is the whole point of giving it a tile of its own. The picture
@@ -283,18 +295,22 @@ pub fn draw_dock(
                 thumbnails.awaiting(key, Duration::from_millis(metrics.row_change_ms.into()))
             });
 
-        if let Some(thumb) = thumbnail {
+        if let (Some(thumb), Some(box_rect)) = (thumbnail, icon_box) {
             // Fitted inside the icon's box, keeping the window's proportions:
             // stretching a window to a square makes it unrecognisable. A
             // landscape window therefore fills the box's width and leaves room
             // above and below, which is what the reference dock does too.
+            //
+            // Deliberately in the surface's own terms rather than the row's: a
+            // window is landscape however the dock is turned, and a picture of
+            // one laid on its side would be nonsense.
             let (w, h) = if thumb.aspect >= 1.0 {
                 (icon_px, icon_px / thumb.aspect)
             } else {
                 (icon_px * thumb.aspect, icon_px)
             };
-            let x = centre_x - w / 2.0;
-            let y = icon_bottom - (icon_px + h) / 2.0;
+            let x = box_rect.x() + (box_rect.width() - w) / 2.0;
+            let y = box_rect.y() + (box_rect.height() - h) / 2.0;
             draw_image(pixmap, t, &thumb.pixmap, x, y, w, h);
 
             // ...and the application's icon badges the corner, so the tile
@@ -309,23 +325,26 @@ pub fn draw_dock(
                     badges.push((rect, name));
                 }
             }
-        } else if let Some(name) = slot.icon_name.as_deref().filter(|_| !awaiting) {
+        } else if let (Some(name), Some(box_rect)) =
+            (slot.icon_name.as_deref().filter(|_| !awaiting), icon_box)
+        {
             if let Some(art) = icons.get(name) {
-                draw_icon(
-                    pixmap,
-                    t,
-                    art,
-                    centre_x - icon_px / 2.0,
-                    icon_bottom - icon_px,
-                    icon_px,
-                );
+                draw_icon(pixmap, t, art, box_rect.x(), box_rect.y(), icon_px);
             }
         }
 
         // The dot marks a running *application*. A minimised window's own tile
         // is not an application, and macOS gives it no dot.
         if slot.kind == SlotKind::App && slot.is_running() {
-            draw_dot(pixmap, t, metrics, palette, centre_x, dot_row);
+            draw_dot(
+                pixmap,
+                t,
+                &frame,
+                metrics,
+                palette,
+                centre_along,
+                panel_near,
+            );
         }
     }
 
@@ -509,22 +528,27 @@ fn draw_image(pixmap: &mut Pixmap, t: Transform, art: &Pixmap, x: f32, y: f32, w
 }
 
 /// The hairline that fences the Trash off from the applications.
+#[allow(clippy::too_many_arguments)]
 fn draw_separator(
     pixmap: &mut Pixmap,
     t: Transform,
+    frame: &Frame,
     metrics: &Metrics,
     palette: &Palette,
-    centre_x: f32,
-    panel: Rect,
+    centre_along: f32,
+    panel_near: f32,
+    panel_thick: f32,
 ) {
     let w = metrics.pt(metrics.separator_line_width);
     let inset = metrics.pt(metrics.separator_inset);
-    let h = panel.height() - inset * 2.0;
-    if h <= 0.0 {
+    let len = panel_thick - inset * 2.0;
+    if len <= 0.0 {
         return;
     }
 
-    let Some(rect) = Rect::from_xywh(centre_x - w / 2.0, panel.y() + inset, w, h) else {
+    // Thin down the row and long across it, so it fences off the tiles either
+    // side of it whichever way the row runs.
+    let Some(rect) = frame.rect(centre_along - w / 2.0, panel_near + inset, w, len) else {
         return;
     };
     // Rounded so the line does not read as a hard-edged bar at this width.
@@ -561,15 +585,19 @@ fn badge_rect(thumb: Rect, icon_px: f32, ratio: f32) -> Option<Rect> {
 fn draw_dot(
     pixmap: &mut Pixmap,
     t: Transform,
+    frame: &Frame,
     metrics: &Metrics,
     palette: &Palette,
-    centre_x: f32,
-    panel_bottom: f32,
+    centre_along: f32,
+    panel_near: f32,
 ) {
     let d = metrics.pt(metrics.dot_size);
-    let cy = panel_bottom - metrics.pt(metrics.dot_bottom_margin);
+    let (cx, cy) = frame.point(
+        centre_along,
+        panel_near + metrics.pt(metrics.dot_bottom_margin),
+    );
 
-    let Some(path) = PathBuilder::from_circle(centre_x, cy, d / 2.0) else {
+    let Some(path) = PathBuilder::from_circle(cx, cy, d / 2.0) else {
         return;
     };
     let mut paint = Paint {
@@ -632,12 +660,14 @@ pub fn draw_panel(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::edge::Edge;
 
     #[test]
     fn panel_is_centred_and_sits_above_the_screen_edge() {
         let m = Metrics::default();
-        let surface_h = m.surface_height();
-        let rect = panel_rect(1000.0, surface_h, &m, 400.0);
+        let surface_h = m.surface_depth();
+        let frame = Frame::new(m.edge, (1000.0, surface_h));
+        let rect = panel_rect(&frame, &m, 400.0, 0.0);
 
         let expected_w = 400.0 + m.pt(m.panel_padding_h) * 2.0;
         assert!((rect.width() - expected_w).abs() < 0.01);
@@ -708,7 +738,7 @@ mod tests {
         shot.fill(tiny_skia::Color::from_rgba8(0, 0, 255, 255));
 
         let m = Metrics::default();
-        let (lw, lh) = (400.0, m.surface_height());
+        let (lw, lh) = (400.0, m.surface_depth());
         let mut pixmap = Pixmap::new(lw as u32, lh.ceil() as u32).unwrap();
         let mut icons = IconCache::default();
         let mut thumbnails = ThumbnailCache::default();
@@ -739,7 +769,7 @@ mod tests {
                 pixmap: &mut pixmap,
                 logical: (lw, lh),
                 scale: 1.0,
-                offset_y: 0.0,
+                slide_out: 0.0,
             },
             &m,
             &Palette::default(),
@@ -805,7 +835,7 @@ mod tests {
             art.save_png(&icon_path).unwrap();
 
             let m = Metrics::default();
-            let (lw, lh) = (400.0, m.surface_height());
+            let (lw, lh) = (400.0, m.surface_depth());
             let mut pixmap = Pixmap::new(lw as u32, lh.ceil() as u32).unwrap();
             let mut icons = IconCache::default();
             let thumbnails = ThumbnailCache::default();
@@ -832,7 +862,7 @@ mod tests {
                     pixmap: &mut pixmap,
                     logical: (lw, lh),
                     scale: 1.0,
-                    offset_y: 0.0,
+                    slide_out: 0.0,
                 },
                 &m,
                 &Palette::default(),
@@ -863,6 +893,105 @@ mod tests {
         );
     }
 
+    /// The panel has to land against whichever edge it was sent to, with the
+    /// row running along that edge. Checked through `draw_dock` rather than
+    /// `panel_rect` alone, since the drawing is what a wrong axis shows up in.
+    #[test]
+    fn the_panel_lands_against_each_edge_in_turn() {
+        for (edge, surface) in [
+            (Edge::Bottom, (600.0, 200.0)),
+            (Edge::Top, (600.0, 200.0)),
+            (Edge::Left, (200.0, 600.0)),
+            (Edge::Right, (200.0, 600.0)),
+        ] {
+            let m = Metrics {
+                edge,
+                ..Metrics::default()
+            };
+            let mut pixmap = Pixmap::new(surface.0 as u32, surface.1 as u32).unwrap();
+            let mut icons = IconCache::default();
+            let slots = [slot(false), slot(false)];
+            let geom = crate::layout::layout(
+                &[crate::layout::SlotMetrics {
+                    rest_width: m.pt(m.tile_size),
+                    magnifies: true,
+                }; 2],
+                None,
+                &m,
+            );
+            let panel = draw_dock(
+                Target {
+                    pixmap: &mut pixmap,
+                    logical: surface,
+                    scale: 1.0,
+                    slide_out: 0.0,
+                },
+                &m,
+                &Palette::default(),
+                Scene {
+                    slots: &slots,
+                    layout: &geom,
+                    icons: &mut icons,
+                    thumbnails: &ThumbnailCache::default(),
+                    drop_target: None,
+                },
+            );
+
+            let frame = Frame::new(edge, surface);
+            let gap = m.pt(m.panel_bottom_gap);
+            assert!(
+                (frame.near_of(panel) - gap).abs() < 0.01,
+                "{edge:?}: panel stands {} from the edge, not {gap}",
+                frame.near_of(panel)
+            );
+            // The row runs along the edge, so the panel is long that way and
+            // only as deep as the panel's own thickness.
+            assert!(
+                (frame.along_len_of(panel) - (geom.content_width + m.pt(m.panel_padding_h) * 2.0))
+                    .abs()
+                    < 0.01,
+                "{edge:?}: the row does not run along the edge"
+            );
+            // ...and it is centred on it.
+            let start = frame.along_start_of(panel);
+            let slack = frame.length() - frame.along_len_of(panel);
+            assert!(
+                (start - slack / 2.0).abs() < 0.01,
+                "{edge:?}: panel is not centred, starts at {start}"
+            );
+        }
+    }
+
+    /// Sliding out for auto-hide pushes the panel through its own edge, not
+    /// downwards -- a top or side dock that slid to the bottom would cross the
+    /// screen on its way out.
+    #[test]
+    fn hiding_pushes_the_panel_out_through_its_own_edge() {
+        for (edge, surface) in [
+            (Edge::Bottom, (600.0, 200.0)),
+            (Edge::Top, (600.0, 200.0)),
+            (Edge::Left, (200.0, 600.0)),
+            (Edge::Right, (200.0, 600.0)),
+        ] {
+            let m = Metrics {
+                edge,
+                ..Metrics::default()
+            };
+            let frame = Frame::new(edge, surface);
+            let resting = panel_rect(&frame, &m, 200.0, 0.0);
+            let hidden = panel_rect(&frame, &m, 200.0, 40.0);
+
+            assert!(
+                (frame.near_of(resting) - frame.near_of(hidden) - 40.0).abs() < 0.01,
+                "{edge:?}: hiding moved the panel by the wrong amount"
+            );
+            assert!(
+                (frame.along_start_of(resting) - frame.along_start_of(hidden)).abs() < 0.01,
+                "{edge:?}: hiding slid the panel sideways"
+            );
+        }
+    }
+
     fn slot(running: bool) -> Slot {
         Slot {
             capture_key: None,
@@ -882,7 +1011,7 @@ mod tests {
     /// Renders one slot and returns the pixmap plus the panel rectangle.
     fn render_one_kind(kind: SlotKind, running: bool, scale: f32) -> (Pixmap, Rect, Metrics) {
         let m = Metrics::default();
-        let (lw, lh) = (400.0, m.surface_height());
+        let (lw, lh) = (400.0, m.surface_depth());
         let mut pixmap = Pixmap::new((lw * scale) as u32, (lh * scale).ceil() as u32).unwrap();
         let mut icons = IconCache::default();
 
@@ -903,7 +1032,7 @@ mod tests {
                 pixmap: &mut pixmap,
                 logical: (lw, lh),
                 scale,
-                offset_y: 0.0,
+                slide_out: 0.0,
             },
             &m,
             &Palette::default(),
@@ -1077,7 +1206,8 @@ mod tests {
     #[test]
     fn panel_wider_than_surface_clamps_to_zero() {
         let m = Metrics::default();
-        let rect = panel_rect(100.0, m.surface_height(), &m, 4000.0);
+        let frame = Frame::new(m.edge, (100.0, m.surface_depth()));
+        let rect = panel_rect(&frame, &m, 4000.0, 0.0);
         assert_eq!(rect.x(), 0.0);
     }
 }

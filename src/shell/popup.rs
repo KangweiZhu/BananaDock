@@ -37,6 +37,8 @@ use wayland_protocols::xdg::shell::client::{
     xdg_wm_base,
 };
 
+use crate::edge::Edge;
+
 /// The version of `xdg_wm_base` SCTK's popup helpers are written against.
 const XDG_WM_BASE_VERSION: u32 = 6;
 
@@ -107,6 +109,7 @@ impl MenuPopup {
         qh: &QueueHandle<D>,
         anchor: (i32, i32, i32, i32),
         size: (u32, u32),
+        edge: Edge,
         slot_index: usize,
         grab: Option<(&wl_seat::WlSeat, u32)>,
     ) -> Result<Self, Box<dyn std::error::Error>>
@@ -125,14 +128,25 @@ impl MenuPopup {
         let positioner = XdgPositioner::new(xdg_shell)?;
         positioner.set_size(size.0 as i32, size.1 as i32);
         positioner.set_anchor_rect(anchor.0, anchor.1, anchor.2.max(1), anchor.3.max(1));
-        // Anchor to the top of the icon and grow upwards: the dock sits at the
-        // bottom of the screen, so there is no room below it.
-        positioner.set_anchor(Anchor::Top);
-        positioner.set_gravity(Gravity::Top);
-        // Near the screen edges, slide the menu along rather than flipping it
-        // downwards off the bottom of the display.
-        positioner
-            .set_constraint_adjustment(ConstraintAdjustment::SlideX | ConstraintAdjustment::FlipY);
+
+        // The menu opens away from the screen's edge -- there is no room for
+        // it on the other side -- and slides along the row rather than
+        // flipping back over the dock when it runs out of screen near the
+        // ends. Which axis is "along" swaps with the dock's edge, so the
+        // constraint has to swap with it.
+        let (anchor_to, gravity, slide) = match edge {
+            Edge::Bottom => (Anchor::Top, Gravity::Top, ConstraintAdjustment::SlideX),
+            Edge::Top => (
+                Anchor::Bottom,
+                Gravity::Bottom,
+                ConstraintAdjustment::SlideX,
+            ),
+            Edge::Left => (Anchor::Right, Gravity::Right, ConstraintAdjustment::SlideY),
+            Edge::Right => (Anchor::Left, Gravity::Left, ConstraintAdjustment::SlideY),
+        };
+        positioner.set_anchor(anchor_to);
+        positioner.set_gravity(gravity);
+        positioner.set_constraint_adjustment(slide);
 
         let surface = compositor.create_surface(qh);
         let popup = Popup::from_surface(None, &positioner, qh, surface, xdg_shell)?;

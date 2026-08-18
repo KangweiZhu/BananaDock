@@ -65,6 +65,20 @@ pub fn draw(
                     toggle(pixmap, rect, *value);
                 }
             }
+            Control::Choice {
+                label,
+                options,
+                value,
+                ..
+            } => {
+                if hovered == Some(i) {
+                    highlight(pixmap, *top, width);
+                }
+                label_at(pixmap, text, label, *top);
+                if let Some(rect) = ui::control_rect(control, *top, width) {
+                    choice(pixmap, text, rect, options, *value);
+                }
+            }
             Control::Slider {
                 label,
                 value,
@@ -102,6 +116,53 @@ pub fn draw(
                 }
             }
         }
+    }
+}
+
+/// A row of options with the current one filled in.
+///
+/// Every option is on screen at once rather than behind a menu: there are only
+/// ever a handful, and seeing which one is *not* picked is half of what the
+/// control is for.
+fn choice(
+    pixmap: &mut Pixmap,
+    text: &mut TextRenderer,
+    rect: (f32, f32, f32, f32),
+    options: &[&str],
+    selected: usize,
+) {
+    let (x, y, w, h) = rect;
+    if let Some(track) = Rect::from_xywh(x, y, w, h) {
+        if let Some(path) = rounded_rect(track, 6.0) {
+            fill(pixmap, &path, TRACK);
+        }
+    }
+
+    for (i, option) in options.iter().enumerate() {
+        let (sx, sy, sw, sh) = ui::choice_segment(rect, options.len(), i);
+        if i == selected {
+            // Inset, so the fill reads as a pill sitting in the track rather
+            // than as a second track butted against its neighbour.
+            if let Some(r) = Rect::from_xywh(sx + 2.0, sy + 2.0, sw - 4.0, sh - 4.0) {
+                if let Some(path) = rounded_rect(r, 4.0) {
+                    fill(pixmap, &path, ACCENT);
+                }
+            }
+        }
+
+        // Capitalised here rather than in the control: the lower-case spelling
+        // is what goes in the config file, and the two should not drift.
+        let mut shown = option.to_string();
+        shown[..1].make_ascii_uppercase();
+        let tw = text.measure(&shown, LABEL_SIZE);
+        text.draw(
+            pixmap,
+            &shown,
+            LABEL_SIZE,
+            sx + (sw - tw) / 2.0,
+            line_top(sy, sh, LABEL_SIZE),
+            if i == selected { KNOB } else { LABEL },
+        );
     }
 }
 

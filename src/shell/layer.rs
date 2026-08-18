@@ -14,6 +14,8 @@ use smithay_client_toolkit::{
 use tiny_skia::Pixmap;
 use wayland_client::protocol::wl_shm;
 
+use crate::edge::Edge;
+
 /// The dock's layer surface, plus the shm plumbing needed to present to it.
 pub struct LayerDock {
     layer: LayerSurface,
@@ -36,21 +38,18 @@ impl LayerDock {
     /// `Dispatch` bounds through every call site for no benefit. The caller
     /// creates the surface; all the policy still lives here.
     ///
-    /// The surface spans the full width of the output and is much taller than
-    /// the panel, so that magnification and the launch bounce never have to
-    /// resize it -- a resize means a configure round-trip, which would show up
-    /// as a hitch mid-animation. The surplus area is transparent and is masked
-    /// out of the input region so it does not swallow clicks.
+    /// The surface spans the full length of the edge it sits on and is much
+    /// deeper than the panel, so that magnification and the launch bounce
+    /// never have to resize it -- a resize means a configure round-trip, which
+    /// would show up as a hitch mid-animation. The surplus area is transparent
+    /// and is masked out of the input region so it does not swallow clicks.
     pub fn new(
         layer: LayerSurface,
         shm: &Shm,
-        height: u32,
+        edge: Edge,
+        depth: u32,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        // Anchoring to three edges lets the compositor hand us the output's
-        // full width; a width of 0 in set_size means "whatever the anchors
-        // imply".
-        layer.set_anchor(Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT);
-        layer.set_size(0, height);
+        Self::anchor(&layer, edge, depth);
 
         // The dock must never take keyboard focus, or clicking it would steal
         // input from the window the user is actually working in.
@@ -62,26 +61,65 @@ impl LayerDock {
 
         // Sized for the first frame; the pool grows itself when a larger slot
         // is requested.
-        let pool = SlotPool::new(1920 * height as usize * 4, shm)?;
+        let pool = SlotPool::new(1920 * depth as usize * 4, shm)?;
+
+        // The dimension the anchors leave to the compositor starts at zero and
+        // is filled in by the first configure.
+        let (width, height) = if edge.is_vertical() {
+            (depth, 0)
+        } else {
+            (0, depth)
+        };
 
         Ok(Self {
             layer,
             pool,
             buffer: None,
             buffer_size: (0, 0),
-            width: 0,
+            width,
             height,
         })
+    }
+
+    /// Pins the surface to an edge, leaving the length along it to the
+    /// compositor.
+    ///
+    /// Anchoring to three edges is what makes the compositor hand over the
+    /// output's full length; a zero in `set_size` means "whatever the anchors
+    /// imply", so only the depth is ours to state.
+    fn anchor(layer: &LayerSurface, edge: Edge, depth: u32) {
+        let (anchor, size) = match edge {
+            Edge::Bottom => (Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT, (0, depth)),
+            Edge::Top => (Anchor::TOP | Anchor::LEFT | Anchor::RIGHT, (0, depth)),
+            Edge::Left => (Anchor::LEFT | Anchor::TOP | Anchor::BOTTOM, (depth, 0)),
+            Edge::Right => (Anchor::RIGHT | Anchor::TOP | Anchor::BOTTOM, (depth, 0)),
+        };
+        layer.set_anchor(anchor);
+        layer.set_size(size.0, size.1);
+    }
+
+    /// Moves the dock to another edge, or changes how deep it reaches.
+    ///
+    /// The compositor answers with a configure carrying the new size, which is
+    /// where `width` and `height` catch up -- setting them here would describe
+    /// a surface that does not exist yet.
+    pub fn reanchor(&mut self, edge: Edge, depth: u32) {
+        Self::anchor(&self.layer, edge, depth);
+        if edge.is_vertical() {
+            self.width = depth;
+        } else {
+            self.height = depth;
+        }
     }
 
     pub fn layer(&self) -> &LayerSurface {
         &self.layer
     }
 
-    /// Height of the strut other windows must keep clear of.
+    /// Depth of the strut other windows must keep clear of.
     ///
-    /// The surface is far taller than this -- windows only need to avoid the
-    /// panel at its resting size, not the magnification headroom above it,
+    /// The surface reaches far deeper than this -- windows only need to avoid
+    /// the panel at its resting size, not the magnification headroom past it,
     /// which is what macOS does too.
     pub fn set_exclusive_zone(&self, px: i32) {
         self.layer.set_exclusive_zone(px);
