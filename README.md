@@ -16,12 +16,18 @@ implementations of it -- `wlr-foreign-toplevel-management` where it exists, and
 a D-Bus route on KWin, which has no such protocol. Everything else degrades
 quietly when missing.
 
-| Compositor | Position at edge | Window list | Blur | Verdict |
-|---|---|---|---|---|
-| niri | ✅ | ✅ | ✅ | Fully working |
-| Hyprland, sway, Wayfire, river, cosmic | ✅ | ✅ | own mechanism | Expected to work; **not yet tested** |
-| KWin (Plasma) | ✅ | ✅ via D-Bus | ✅ | Fully working, and the primary target |
-| GNOME (Mutter) | ❌ | ❌ | ❌ | **Cannot work.** See below |
+| Compositor | Position at edge | Window list | Blur | Thumbnails | Verdict |
+|---|---|---|---|---|---|
+| niri | ✅ | ✅ | ✅ | ❌ icon instead | Fully working |
+| Hyprland, sway, Wayfire, river, cosmic | ✅ | ✅ | own mechanism | ❌ icon instead | Expected to work; **not yet tested** |
+| KWin (Plasma) | ✅ | ✅ via D-Bus | ✅ | ✅ via D-Bus | Fully working, and the primary target |
+| GNOME (Mutter) | ❌ | ❌ | ❌ | ❌ | **Cannot work.** See below |
+
+Thumbnails are the picture of the window itself on a minimised tile, and they
+are KWin-only: the capture goes through `org.kde.KWin.ScreenShot2`, and no
+portable protocol offers the same thing. Everywhere else a minimised window
+still gets its own tile -- it just shows the application's icon rather than the
+window.
 
 ### How KWin works
 
