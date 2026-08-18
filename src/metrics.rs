@@ -65,6 +65,19 @@ pub struct Metrics {
     /// Vertical inset of the line from the panel's edges.
     pub separator_inset: f32,
 
+    // -- Minimised window thumbnails ---------------------------------------
+    /// Diameter of the application badge on a minimised window's thumbnail,
+    /// as a fraction of the icon artwork's size.
+    ///
+    /// macOS marks a minimised window with its application's icon over the
+    /// thumbnail's bottom-right corner. Measured off a reference dock holding
+    /// five minimised windows: a 48px tile carries a 47x27 thumbnail and a
+    /// 24px badge -- half the tile -- centred exactly on that corner, so the
+    /// badge overhangs the thumbnail and comes back down to the row's
+    /// baseline. Without it a minimised tile is a bare strip of pixels with
+    /// nothing to say which application it belongs to.
+    pub thumbnail_badge_ratio: f32,
+
     // -- Running indicator dot --------------------------------------------
     pub dot_size: f32,
     /// Dot centre to the panel's bottom edge.
@@ -121,6 +134,8 @@ impl Default for Metrics {
             separator_width: 20.0,     // [measure]
             separator_line_width: 1.0, // [measure]
             separator_inset: 14.0,     // [measure]
+
+            thumbnail_badge_ratio: 0.5, // [reference] 24px badge on a 48px tile
 
             dot_size: 4.0,          // [measure]
             dot_bottom_margin: 6.0, // [measure]

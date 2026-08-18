@@ -465,7 +465,9 @@ mod tests {
     #[test]
     fn panel_height_sets_the_base() {
         let mut m = Metrics::default();
-        Config::parse("panel_height = 73.0").unwrap().apply_to(&mut m);
+        Config::parse("panel_height = 73.0")
+            .unwrap()
+            .apply_to(&mut m);
         assert_eq!(m.panel_height(), 73.0);
     }
 

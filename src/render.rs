@@ -220,6 +220,10 @@ pub fn draw_dock(
     // while the icon above it grows.
     let dot_row = panel.bottom();
 
+    // Application badges for minimised windows, drawn once the whole row is
+    // down. See where they are pushed for why they cannot go in as they come.
+    let mut badges: Vec<(Rect, &str)> = Vec::new();
+
     for (i, (slot, geom)) in slots.iter().zip(&layout.slots).enumerate() {
         let centre_x = row_x + geom.centre();
 
@@ -268,21 +272,30 @@ pub fn draw_dock(
 
         if let Some(thumb) = thumbnail {
             // Fitted inside the icon's box, keeping the window's proportions:
-            // stretching a window to a square makes it unrecognisable.
+            // stretching a window to a square makes it unrecognisable. A
+            // landscape window therefore fills the box's width and leaves room
+            // above and below, which is what the reference dock does too.
             let (w, h) = if thumb.aspect >= 1.0 {
                 (icon_px, icon_px / thumb.aspect)
             } else {
                 (icon_px * thumb.aspect, icon_px)
             };
-            draw_image(
-                pixmap,
-                t,
-                &thumb.pixmap,
-                centre_x - w / 2.0,
-                icon_bottom - (icon_px + h) / 2.0,
-                w,
-                h,
-            );
+            let x = centre_x - w / 2.0;
+            let y = icon_bottom - (icon_px + h) / 2.0;
+            draw_image(pixmap, t, &thumb.pixmap, x, y, w, h);
+
+            // ...and the application's icon badges the corner, so the tile
+            // says *which* window this is. Held back for a second pass: the
+            // badge hangs past the picture and, with the tiles packed close
+            // together, into the next tile -- which is still to be drawn and
+            // would paint over it.
+            if let Some(rect) = Rect::from_xywh(x, y, w, h)
+                .and_then(|thumb| badge_rect(thumb, icon_px, metrics.thumbnail_badge_ratio))
+            {
+                if let Some(name) = slot.icon_name.as_deref() {
+                    badges.push((rect, name));
+                }
+            }
         } else if let Some(name) = slot.icon_name.as_deref() {
             if let Some(art) = icons.get(name) {
                 draw_icon(
@@ -300,6 +313,12 @@ pub fn draw_dock(
         // is not an application, and macOS gives it no dot.
         if slot.kind == SlotKind::App && slot.is_running() {
             draw_dot(pixmap, t, metrics, palette, centre_x, dot_row);
+        }
+    }
+
+    for (rect, name) in badges {
+        if let Some(art) = icons.get(name) {
+            draw_icon(pixmap, t, art, rect.x(), rect.y(), rect.width());
         }
     }
 
@@ -508,6 +527,23 @@ fn draw_separator(
     pixmap.fill_path(&path, &paint, FillRule::Winding, t, None);
 }
 
+/// Where the application badge sits on a minimised window's thumbnail.
+///
+/// Centred exactly on the thumbnail's bottom-right corner, so it overhangs the
+/// picture on two sides. That overhang is the point: a landscape thumbnail
+/// stops well short of the row's baseline, and the badge reaches back down to
+/// it, which is what stops a minimised tile from reading as a stray strip
+/// floating in the middle of the panel.
+fn badge_rect(thumb: Rect, icon_px: f32, ratio: f32) -> Option<Rect> {
+    let size = icon_px * ratio;
+    Rect::from_xywh(
+        thumb.right() - size / 2.0,
+        thumb.bottom() - size / 2.0,
+        size,
+        size,
+    )
+}
+
 /// The dot under a running application.
 fn draw_dot(
     pixmap: &mut Pixmap,
@@ -606,6 +642,138 @@ mod tests {
         let path = rounded_rect(rect, 40.0).expect("capsule path");
         assert!((path.bounds().width() - 200.0).abs() < 0.01);
         assert!((path.bounds().height() - 80.0).abs() < 0.01);
+    }
+
+    /// The badge marks which application a minimised window belongs to, and
+    /// its overhang past the thumbnail's corner is what brings the tile back
+    /// down to the row's baseline. Both properties live in the geometry, so
+    /// they are worth pinning even though the drawing itself is not.
+    #[test]
+    fn the_badge_straddles_the_thumbnails_corner() {
+        // A 16:9 window in a 48pt box: 48 wide, 27 tall.
+        let thumb = Rect::from_xywh(100.0, 50.0, 48.0, 27.0).unwrap();
+        let badge = badge_rect(thumb, 48.0, 0.5).expect("badge rect");
+
+        assert!((badge.width() - 24.0).abs() < 0.01, "half the icon box");
+        // Centred on the corner: half of it hangs past each edge.
+        assert!((badge.right() - (thumb.right() + 12.0)).abs() < 0.01);
+        assert!((badge.bottom() - (thumb.bottom() + 12.0)).abs() < 0.01);
+        assert!(badge.x() < thumb.right() && badge.y() < thumb.bottom());
+    }
+
+    /// A tall window fills the box's height instead, and the badge follows it
+    /// rather than staying pinned to where a landscape corner would have been.
+    #[test]
+    fn the_badge_follows_a_portrait_thumbnail() {
+        let thumb = Rect::from_xywh(100.0, 50.0, 27.0, 48.0).unwrap();
+        let badge = badge_rect(thumb, 48.0, 0.5).expect("badge rect");
+        assert!((badge.right() - (thumb.right() + 12.0)).abs() < 0.01);
+        assert!((badge.bottom() - (thumb.bottom() + 12.0)).abs() < 0.01);
+    }
+
+    /// Renders a real frame and checks the badge actually lands on the
+    /// picture. The geometry test above cannot see a drawing-order mistake --
+    /// painting the badge before the thumbnail would bury it -- and this is
+    /// the only tile whose artwork is composed of two images.
+    #[test]
+    fn a_minimised_tile_paints_its_application_over_the_thumbnail() {
+        use crate::thumbnails::Thumbnail;
+        use std::sync::Arc;
+
+        // A fake icon on disk: `IconCache::get` accepts absolute paths, so the
+        // test does not depend on whichever icon theme happens to be installed.
+        let dir = std::env::temp_dir().join("kdock-badge-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let icon_path = dir.join("icon.png");
+        let mut art = Pixmap::new(64, 64).unwrap();
+        art.fill(tiny_skia::Color::from_rgba8(255, 0, 0, 255));
+        art.save_png(&icon_path).unwrap();
+
+        // A 16:9 window, which is the case that leaves room around the picture.
+        const ASPECT: f32 = 16.0 / 9.0;
+        let mut shot = Pixmap::new(160, 90).unwrap();
+        shot.fill(tiny_skia::Color::from_rgba8(0, 0, 255, 255));
+
+        let m = Metrics::default();
+        let (lw, lh) = (400.0, m.surface_height());
+        let mut pixmap = Pixmap::new(lw as u32, lh.ceil() as u32).unwrap();
+        let mut icons = IconCache::default();
+        let mut thumbnails = ThumbnailCache::default();
+        thumbnails.insert(
+            "w".into(),
+            Thumbnail {
+                pixmap: Arc::new(shot),
+                aspect: ASPECT,
+            },
+        );
+
+        let slots = [Slot {
+            kind: SlotKind::MinimizedWindow,
+            capture_key: Some("w".into()),
+            icon_name: Some(icon_path.to_string_lossy().into_owned()),
+            ..slot(false)
+        }];
+        let geom = crate::layout::layout(
+            &[crate::layout::SlotMetrics {
+                rest_width: m.pt(m.tile_size),
+                magnifies: true,
+            }],
+            None,
+            &m,
+        );
+        let panel = draw_dock(
+            Target {
+                pixmap: &mut pixmap,
+                logical: (lw, lh),
+                scale: 1.0,
+                offset_y: 0.0,
+            },
+            &m,
+            &Palette::default(),
+            Scene {
+                slots: &slots,
+                layout: &geom,
+                icons: &mut icons,
+                thumbnails: &thumbnails,
+                drop_target: None,
+            },
+        );
+
+        // Where the picture and its badge should have landed.
+        let icon_px = m.pt(m.tile_size) * m.icon_size_ratio;
+        let centre_x = panel.x() + m.pt(m.panel_padding_h) + m.pt(m.tile_size) / 2.0;
+        let icon_bottom = panel.bottom() - m.pt(m.icon_bottom_margin());
+        let h = icon_px / ASPECT;
+        let thumb = Rect::from_xywh(
+            centre_x - icon_px / 2.0,
+            icon_bottom - (icon_px + h) / 2.0,
+            icon_px,
+            h,
+        )
+        .unwrap();
+        let badge = badge_rect(thumb, icon_px, m.thumbnail_badge_ratio).unwrap();
+        let at = |x: f32, y: f32| pixmap.pixel(x as u32, y as u32).unwrap();
+
+        // The window shows through where the badge does not reach...
+        let window = at(thumb.x() + 3.0, thumb.y() + h / 2.0);
+        assert!(
+            window.blue() > 150 && window.red() < 80,
+            "the thumbnail is not there: {window:?}"
+        );
+        // ...the badge covers the corner it is centred on...
+        let corner = at(thumb.right() - 3.0, thumb.bottom() - 3.0);
+        assert!(
+            corner.red() > 150 && corner.blue() < 80,
+            "the badge is behind the thumbnail: {corner:?}"
+        );
+        // ...and overhangs below it, where the bare picture stopped short.
+        let under = at(badge.x() + badge.width() / 2.0, thumb.bottom() + 3.0);
+        assert!(
+            under.red() > 150,
+            "the badge does not reach past the picture: {under:?}"
+        );
+
+        std::fs::remove_file(&icon_path).ok();
     }
 
     fn slot(running: bool) -> Slot {
