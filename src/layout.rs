@@ -15,6 +15,7 @@
 //! Ported from the Qt implementation's `relayout()`
 //! (`git show ee6971b:qml/DockPanel.qml`).
 
+use crate::edge::Frame;
 use crate::metrics::Metrics;
 
 /// What the layout needs to know about one slot.
@@ -58,6 +59,20 @@ impl Layout {
     /// Which slot is under a point in row-local coordinates.
     pub fn hit(&self, x: f32) -> Option<usize> {
         self.slots.iter().position(|s| s.contains(x))
+    }
+
+    /// Which slot is under a *surface* position, on a row at any screen edge.
+    ///
+    /// Callers holding raw surface coordinates want this rather than [`hit`],
+    /// which needs the position already reduced to a distance along the row.
+    /// Passing a surface `x` straight to `hit` is correct on a dock at the top
+    /// or bottom and quietly wrong on one at the side -- the failure mode
+    /// `edge`'s module documentation warns about, and how drops onto a
+    /// right-hand dock came to do nothing at all.
+    ///
+    /// [`hit`]: Layout::hit
+    pub fn hit_surface(&self, frame: &Frame, row_origin: f32, x: f32, y: f32) -> Option<usize> {
+        self.hit(frame.along_of(x, y) - row_origin)
     }
 
     /// Rebuilds positions from a set of widths.
@@ -258,6 +273,7 @@ pub fn layout(slots: &[SlotMetrics], cursor_rest_x: Option<f32>, metrics: &Metri
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::edge::Edge;
 
     /// The bounce must not be cut off mid-air. An application that appears
     /// almost at once -- 90ms was measured on a warm start -- caught the icon
@@ -430,6 +446,52 @@ mod tests {
         assert_eq!(l.hit(tile * 2.5), Some(2));
         assert_eq!(l.hit(-1.0), None);
         assert_eq!(l.hit(tile * 4.0 + 1.0), None);
+    }
+
+    /// The last slot on a side dock is the one drops land on most -- the Trash
+    /// sits there -- and it is the case a surface `x` gets wrong most cheaply:
+    /// on a right-hand dock `x` never leaves the panel's own thickness, so it
+    /// falls short of the row and hit testing returns nothing at all. Dropping
+    /// a file on the Trash then did nothing, silently, because "no slot" is
+    /// also what a drop on empty panel looks like.
+    #[test]
+    fn a_surface_point_hits_the_same_slot_on_every_edge() {
+        let m = Metrics::default();
+        let tile = m.pt(m.tile_size);
+        let l = layout(&tiles(4, &m), None, &m);
+        // A tall, narrow surface, as a dock at the side gets.
+        let surface = (120.0, 1000.0);
+        let row_origin = 300.0;
+        // Squarely inside the last tile.
+        let along = row_origin + tile * 3.5;
+
+        for edge in [Edge::Bottom, Edge::Top, Edge::Left, Edge::Right] {
+            let f = Frame::new(edge, surface);
+            let (x, y) = f.point(along, 20.0);
+            assert_eq!(
+                l.hit_surface(&f, row_origin, x, y),
+                Some(3),
+                "{edge:?} should find the last slot"
+            );
+        }
+    }
+
+    /// Off the end of the row is still nothing, on every edge: the conversion
+    /// must not turn a miss into a hit.
+    #[test]
+    fn a_surface_point_past_the_row_hits_nothing() {
+        let m = Metrics::default();
+        let tile = m.pt(m.tile_size);
+        let l = layout(&tiles(4, &m), None, &m);
+        let surface = (120.0, 1000.0);
+        let row_origin = 300.0;
+        let past = row_origin + tile * 4.0 + 1.0;
+
+        for edge in [Edge::Bottom, Edge::Top, Edge::Left, Edge::Right] {
+            let f = Frame::new(edge, surface);
+            let (x, y) = f.point(past, 20.0);
+            assert_eq!(l.hit_surface(&f, row_origin, x, y), None, "{edge:?}");
+        }
     }
 
     #[test]
