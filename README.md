@@ -156,6 +156,34 @@ cd dist && makepkg --printsrcinfo > .SRCINFO
 stale the moment anything above it changes, and it belongs in the AUR
 repository rather than in this one.
 
+## Deploying a change
+
+[dist/deploy.sh](dist/deploy.sh) takes the working tree to a running dock in
+one step — build, test, install, restart:
+
+```bash
+dist/deploy.sh              # install under ~/.local, restart the dock
+dist/deploy.sh --package    # install through pacman instead (asks for root)
+dist/deploy.sh --no-restart # install, leave the running dock alone
+dist/deploy.sh --dry-run    # say what would happen, change nothing
+```
+
+Two things have to pass before the running dock is touched, because a dock
+that will not start leaves the desktop without one: the test suite, and a
+frame the new binary renders offscreen and must actually write. Either failing
+stops the deploy with the old dock still up.
+
+It also migrates an install left by the old `kdock` name — the configuration
+directory, the user service, the desktop entries and the binary — and takes
+down an instance started by hand, which `systemctl` does not know about and
+which would otherwise fight the new one for the same layer surface and D-Bus
+name.
+
+The default route installs under `~/.local` and needs no root, which is what
+makes it usable unattended. `--package` is the supported install and goes
+through `makepkg`, so pacman owns the files; pick one route and stay on it,
+since two installs mean two desktop entries with different `Exec=` paths.
+
 ## Running
 
 ```bash
