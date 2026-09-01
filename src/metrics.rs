@@ -415,9 +415,13 @@ impl Palette {
             menu_background: Color::rgba(0.96, 0.96, 0.97, 0.98),
             menu_border: Color::rgba(0.0, 0.0, 0.0, 0.12),
             menu_text: Color::rgba(0.0, 0.0, 0.0, 0.85),
-            // The accent and its text stay put: a selected row is the accent
-            // colour with white on it in both appearances.
-            menu_highlight: Color::rgba(0.20, 0.48, 0.95, 1.0),
+            // [system] `NSColor.selectedContentBackgroundColor`, light
+            // appearance: sRGB 0, 99, 225. Not `systemBlue` (0, 122, 255) and
+            // not `controlAccentColor` (the same) -- macOS fills a selected row
+            // with a distinctly deeper blue than the accent swatch it is
+            // derived from, which is why a plain accent blue reads as too
+            // bright next to the real thing. White text on it either way.
+            menu_highlight: Color::rgba(0.0, 0.3882, 0.8824, 1.0),
             menu_highlight_text: Color::rgba(1.0, 1.0, 1.0, 1.0),
             menu_separator: Color::rgba(0.0, 0.0, 0.0, 0.12),
         }
@@ -436,7 +440,10 @@ impl Palette {
             menu_background: Color::rgba(0.16, 0.16, 0.17, 0.98),
             menu_border: Color::rgba(1.0, 1.0, 1.0, 0.12),
             menu_text: Color::rgba(1.0, 1.0, 1.0, 0.92),
-            menu_highlight: Color::rgba(0.20, 0.48, 0.95, 1.0),
+            // [system] The same colour in the dark appearance: sRGB 0, 88, 208.
+            // It goes *down* rather than up -- the selection is read against a
+            // dark menu, and the light appearance's blue would glare on it.
+            menu_highlight: Color::rgba(0.0, 0.3451, 0.8157, 1.0),
             menu_highlight_text: Color::rgba(1.0, 1.0, 1.0, 1.0),
             menu_separator: Color::rgba(1.0, 1.0, 1.0, 0.12),
         }
@@ -466,9 +473,41 @@ mod tests {
         assert!(dark.menu_text.r > 0.5 && dark.menu_background.r < 0.5);
         assert!(light.menu_text.r < 0.5 && light.menu_background.r > 0.5);
 
-        // The accent is a system colour, not ink: it stays put.
-        assert_eq!(dark.menu_highlight.b, light.menu_highlight.b);
+        // The selection is blue in both, and read against the menu behind it,
+        // so the dark appearance's is the deeper of the two -- the light one's
+        // blue glares on a dark menu. White text on it either way.
+        for p in [&dark, &light] {
+            assert!(
+                p.menu_highlight.b > p.menu_highlight.r && p.menu_highlight.b > 0.5,
+                "the selection should be blue"
+            );
+        }
+        assert!(
+            dark.menu_highlight.b < light.menu_highlight.b,
+            "the dark appearance's selection should be the deeper blue"
+        );
         assert_eq!(dark.menu_highlight_text.r, light.menu_highlight_text.r);
+    }
+
+    /// The selection is not the accent swatch. macOS fills a selected row with
+    /// `selectedContentBackgroundColor`, which is a good deal deeper than the
+    /// `systemBlue`/`controlAccentColor` it derives from -- 0,99,225 against
+    /// 0,122,255 in the light appearance. Reaching for the accent blue instead
+    /// is the obvious mistake, and it reads as too bright beside the real
+    /// thing.
+    #[test]
+    fn the_selection_is_deeper_than_the_accent_swatch() {
+        const ACCENT_G: f32 = 122.0 / 255.0;
+        const ACCENT_B: f32 = 255.0 / 255.0;
+
+        for appearance in [Appearance::Dark, Appearance::Light] {
+            let h = Palette::for_appearance(appearance).menu_highlight;
+            assert!(
+                h.g < ACCENT_G && h.b < ACCENT_B,
+                "{appearance:?}: {:?} is no deeper than the accent swatch",
+                h
+            );
+        }
     }
 
     /// Both docks are the same glass. The reference's light panel adds a white
