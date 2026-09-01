@@ -170,7 +170,7 @@ fn decode_raster(data: &[u8]) -> Option<Pixmap> {
 /// is premultiplied throughout. Skipping this step leaves translucent icon
 /// edges too bright -- a halo that is easy to miss and hard to trace back.
 fn pixmap_from_straight_rgba(mut data: Vec<u8>, w: u32, h: u32) -> Option<Pixmap> {
-    for px in data.chunks_exact_mut(4) {
+    for px in data.as_chunks_mut::<4>().0 {
         let a = px[3] as u32;
         px[0] = ((px[0] as u32 * a + 127) / 255) as u8;
         px[1] = ((px[1] as u32 * a + 127) / 255) as u8;

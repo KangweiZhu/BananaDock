@@ -261,7 +261,7 @@ fn to_pixmap(raw: &[u8], width: u32, height: u32, stride: u32, format: u32) -> O
     for y in 0..height as usize {
         let row_start = y * stride as usize;
         let row = raw.get(row_start..row_start + width as usize * 4)?;
-        for (x, px) in row.chunks_exact(4).enumerate() {
+        for (x, px) in row.as_chunks::<4>().0.iter().enumerate() {
             let o = (y * width as usize + x) * 4;
             dst[o] = px[2];
             dst[o + 1] = px[1];

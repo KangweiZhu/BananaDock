@@ -190,7 +190,12 @@ impl LayerDock {
 /// native-endian `0xAARRGGBB` word. Same premultiplied channel values, so this
 /// is purely a repack -- on little-endian it amounts to swapping R and B.
 pub fn copy_to_argb8888(src: &[u8], dst: &mut [u8]) {
-    for (s, d) in src.chunks_exact(4).zip(dst.chunks_exact_mut(4)) {
+    for (s, d) in src
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(dst.as_chunks_mut::<4>().0.iter_mut())
+    {
         let argb =
             ((s[3] as u32) << 24) | ((s[0] as u32) << 16) | ((s[1] as u32) << 8) | (s[2] as u32);
         d.copy_from_slice(&argb.to_ne_bytes());
