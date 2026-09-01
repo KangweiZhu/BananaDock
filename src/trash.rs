@@ -164,7 +164,7 @@ mod tests {
     use super::*;
 
     fn temp(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("kdock-trash-{name}"));
+        let d = std::env::temp_dir().join(format!("bananadock-trash-{name}"));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
@@ -189,7 +189,7 @@ mod tests {
     /// not an error.
     #[test]
     fn a_missing_directory_reads_as_empty() {
-        let d = std::env::temp_dir().join("kdock-trash-nonexistent-7c1f");
+        let d = std::env::temp_dir().join("bananadock-trash-nonexistent-7c1f");
         let _ = std::fs::remove_dir_all(&d);
         assert!(!read(&d).full);
     }

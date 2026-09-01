@@ -1,13 +1,13 @@
 [Desktop Entry]
 Type=Application
-Name=kdock
+Name=BananaDock
 GenericName=Dock
 Comment=A macOS-style dock for Wayland
 # MUST be the absolute path to the installed binary. KWin traces a client's
 # process back to a desktop entry through this, and grants the interfaces named
 # below only on a match -- a bare command name does not resolve and the grant
 # silently never happens. The install step rewrites this.
-Exec=/usr/bin/kdock
+Exec=/usr/bin/bananadock
 Icon=user-desktop
 Terminal=false
 Categories=Utility;

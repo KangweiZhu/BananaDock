@@ -140,13 +140,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let surface = compositor.create_surface(&qh);
     let scale = SurfaceScale::new(&globals, &qh, &surface);
     if !scale.is_fractional() {
-        eprintln!("kdock: no wp-fractional-scale-v1; falling back to whole-number output scaling.");
+        eprintln!(
+            "bananadock: no wp-fractional-scale-v1; falling back to whole-number output scaling."
+        );
     }
     let background_effect = BackgroundEffectState::new(&globals, &qh);
     let blur_surface = background_effect.get_background_effect(&surface, &qh).ok();
     if blur_surface.is_none() {
         eprintln!(
-            "kdock: no ext-background-effect-v1; the panel will not be frosted. \
+            "bananadock: no ext-background-effect-v1; the panel will not be frosted. \
              Hyprland provides blur through its own `blurls` setting instead."
         );
     }
@@ -160,7 +162,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .and_then(|name| find_output(&output_state, name));
     if config.output.is_some() && chosen.is_none() {
         eprintln!(
-            "kdock: no output named {:?} is attached; using the compositor's choice for now.",
+            "bananadock: no output named {:?} is attached; using the compositor's choice for now.",
             config.output.as_deref().unwrap_or_default()
         );
     }
@@ -206,8 +208,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ) {
             Ok(conn) => kwin = Some(KwinWindows::new(Some(conn), commands)),
             Err(e) => eprintln!(
-                "kdock: no window source available ({e}). On Plasma, install \
-                 kdock.desktop with \
+                "bananadock: no window source available ({e}). On Plasma, install \
+                 bananadock.desktop with \
                  X-KDE-Wayland-Interfaces=org_kde_plasma_window_management \
                  and an Exec= naming this binary."
             ),
@@ -323,7 +325,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 })
                 .map_err(|e| format!("could not listen for signals: {e}"))?;
         }
-        Err(e) => eprintln!("kdock: could not install signal handling: {e}"),
+        Err(e) => eprintln!("bananadock: could not install signal handling: {e}"),
     }
 
     // Held for the lifetime of the loop: dropping a watcher stops its events.
@@ -481,8 +483,8 @@ fn dump_frame(path: &str, width: u32, ids: &[String]) -> Result<(), Box<dyn std:
 
     let index = LauncherIndex::load();
     let mut icons = IconCache::new(None);
-    // `KDOCK_TRASH=full|empty` previews the Trash tile offline.
-    let trash = match std::env::var("KDOCK_TRASH").ok().as_deref() {
+    // `BANANADOCK_TRASH=full|empty` previews the Trash tile offline.
+    let trash = match std::env::var("BANANADOCK_TRASH").ok().as_deref() {
         Some("full") => Some(model::TrashState { full: true }),
         Some("empty") => Some(model::TrashState { full: false }),
         _ => None,
@@ -490,10 +492,10 @@ fn dump_frame(path: &str, width: u32, ids: &[String]) -> Result<(), Box<dyn std:
     let slots = model::build_slots(ids, &[], &index, trash);
     let tile = metrics.pt(metrics.tile_size);
 
-    // `KDOCK_CURSOR` places the pointer, in resting-layout coordinates, so the
+    // `BANANADOCK_CURSOR` places the pointer, in resting-layout coordinates, so the
     // magnification curve can be compared against a reference screenshot
     // without a live pointer.
-    let cursor = std::env::var("KDOCK_CURSOR")
+    let cursor = std::env::var("BANANADOCK_CURSOR")
         .ok()
         .and_then(|v| v.parse::<f32>().ok());
     let sep = metrics.pt(metrics.separator_width);
@@ -512,9 +514,9 @@ fn dump_frame(path: &str, width: u32, ids: &[String]) -> Result<(), Box<dyn std:
         .collect();
     let geometry = layout::layout(&slot_metrics, cursor, &metrics);
 
-    // `KDOCK_SCALE` renders at an output scale, for checking HiDPI output
+    // `BANANADOCK_SCALE` renders at an output scale, for checking HiDPI output
     // without a HiDPI display.
-    let scale = std::env::var("KDOCK_SCALE")
+    let scale = std::env::var("BANANADOCK_SCALE")
         .ok()
         .and_then(|v| v.parse::<f32>().ok())
         .unwrap_or(1.0);
@@ -735,7 +737,7 @@ impl App {
     }
 
     fn debug_dump_windows(&self, source: &str) {
-        if std::env::var_os("KDOCK_DEBUG").is_none() {
+        if std::env::var_os("BANANADOCK_DEBUG").is_none() {
             return;
         }
         eprintln!(
@@ -812,7 +814,7 @@ impl App {
         if let Some(kwin) = self.kwin.as_mut() {
             kwin.apply(snapshot);
         }
-        if std::env::var_os("KDOCK_DEBUG").is_some() {
+        if std::env::var_os("BANANADOCK_DEBUG").is_some() {
             eprintln!(
                 "-- kwin push: {} window(s)",
                 self.windows().toplevels().len()
@@ -1044,7 +1046,7 @@ impl App {
             }
         }
 
-        if std::env::var_os("KDOCK_DEBUG_ANIM").is_some() {
+        if std::env::var_os("BANANADOCK_DEBUG_ANIM").is_some() {
             let w: Vec<i32> = self.current_widths.iter().map(|w| *w as i32).collect();
             let t: Vec<i32> = target_widths.iter().map(|w| *w as i32).collect();
             eprintln!("ANIM dt={dt_ms:.0} cur={w:?} tgt={t:?} moving={moving}");
@@ -1091,7 +1093,7 @@ impl App {
         // Geometry stays logical; only the raster target grows with the output.
         let (bw, bh) = self.scale.buffer_size(w, h);
         let Some(mut pixmap) = Pixmap::new(bw, bh) else {
-            eprintln!("kdock: could not allocate a {bw}x{bh} pixmap");
+            eprintln!("bananadock: could not allocate a {bw}x{bh} pixmap");
             return;
         };
 
@@ -1186,7 +1188,7 @@ impl App {
         // attached, or the compositor sizes the surface by raw buffer pixels.
         self.scale.set_logical_size(w, h);
         if let Err(e) = self.dock.present(&pixmap) {
-            eprintln!("kdock: present failed: {e}");
+            eprintln!("bananadock: present failed: {e}");
         }
     }
 
@@ -1253,11 +1255,11 @@ impl App {
     /// for "applying" it.
     fn write_setting(&mut self, key: &'static str, value: toml_edit::Value) {
         let Some(path) = self.config_path.clone() else {
-            eprintln!("kdock: no writable configuration directory");
+            eprintln!("bananadock: no writable configuration directory");
             return;
         };
         if let Err(e) = config::Config::save_settings(&path, &[(key, value)]) {
-            eprintln!("kdock: could not save {}: {e}", path.display());
+            eprintln!("bananadock: could not save {}: {e}", path.display());
         }
     }
 
@@ -1278,7 +1280,7 @@ impl App {
                     let _ = child.wait();
                 });
             }
-            Err(e) => eprintln!("kdock: could not open the settings window: {e}"),
+            Err(e) => eprintln!("bananadock: could not open the settings window: {e}"),
         }
     }
 
@@ -1355,7 +1357,7 @@ impl App {
                 self.menu_layout = layout;
                 self.open_menu = Some(popup);
             }
-            Err(e) => eprintln!("kdock: could not open the menu: {e}"),
+            Err(e) => eprintln!("bananadock: could not open the menu: {e}"),
         }
     }
 
@@ -1405,7 +1407,7 @@ impl App {
             return;
         };
         if let Err(e) = Config::save_pinned(path, &self.pinned) {
-            eprintln!("kdock: could not save the pinned list: {e}");
+            eprintln!("bananadock: could not save the pinned list: {e}");
         }
     }
 
@@ -1487,7 +1489,7 @@ impl App {
         );
 
         if let Err(e) = popup.present(&pixmap) {
-            eprintln!("kdock: menu present failed: {e}");
+            eprintln!("bananadock: menu present failed: {e}");
         }
     }
 
@@ -1695,7 +1697,7 @@ impl App {
         });
         if matches {
             eprintln!(
-                "kdock: output {wanted:?} was attached or removed; restart to move the dock there."
+                "bananadock: output {wanted:?} was attached or removed; restart to move the dock there."
             );
         }
     }
@@ -1836,7 +1838,7 @@ impl App {
                 };
                 for path in &paths {
                     if let Err(e) = trash::move_to_trash(path, &dir) {
-                        eprintln!("kdock: could not trash {}: {e}", path.display());
+                        eprintln!("bananadock: could not trash {}: {e}", path.display());
                     }
                 }
                 self.reload_trash();
@@ -2007,7 +2009,7 @@ impl App {
             .by_id(&slot.key)
             .and_then(|l| l.exec.as_deref())
         else {
-            eprintln!("kdock: {} has no Exec= to launch", slot.key);
+            eprintln!("bananadock: {} has no Exec= to launch", slot.key);
             return;
         };
 
@@ -2073,7 +2075,7 @@ impl App {
                     let _ = child.wait();
                 });
             }
-            Err(e) => eprintln!("kdock: could not launch {program}: {e}"),
+            Err(e) => eprintln!("bananadock: could not launch {program}: {e}"),
         }
     }
 }
@@ -2118,7 +2120,7 @@ fn open_trash() {
         .stderr(std::process::Stdio::null())
         .spawn()
     {
-        eprintln!("kdock: could not open the Trash: {e}");
+        eprintln!("bananadock: could not open the Trash: {e}");
     }
 }
 
@@ -2227,7 +2229,7 @@ impl DataDeviceHandler for App {
         let pipe = match offer.receive(drops::URI_LIST.to_owned()) {
             Ok(p) => p,
             Err(e) => {
-                eprintln!("kdock: could not read the drop: {e}");
+                eprintln!("bananadock: could not read the drop: {e}");
                 return;
             }
         };
@@ -2258,7 +2260,7 @@ impl DataDeviceHandler for App {
                     }
                     Err(e) if e.kind() == std::io::ErrorKind::Interrupted => PostAction::Continue,
                     Err(e) => {
-                        eprintln!("kdock: error reading the drop: {e}");
+                        eprintln!("bananadock: error reading the drop: {e}");
                         offer.finish();
                         offer.destroy();
                         PostAction::Remove
@@ -2632,7 +2634,7 @@ impl ForeignToplevelHandler for App {
     }
 
     fn toplevels_changed(&mut self, _: &Connection, qh: &QueueHandle<Self>) {
-        if std::env::var_os("KDOCK_DEBUG").is_some() {
+        if std::env::var_os("BANANADOCK_DEBUG").is_some() {
             eprintln!("-- {} toplevel(s)", self.windows().toplevels().len());
             for t in self.windows().toplevels() {
                 eprintln!(
@@ -2676,7 +2678,7 @@ impl SeatHandler for App {
         if capability == Capability::Pointer && self.pointer.is_none() {
             match self.seat_state.get_pointer(qh, &seat) {
                 Ok(p) => self.pointer = Some(p),
-                Err(e) => eprintln!("kdock: no pointer: {e}"),
+                Err(e) => eprintln!("bananadock: no pointer: {e}"),
             }
         }
     }

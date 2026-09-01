@@ -906,7 +906,7 @@ mod tests {
 
         // A fake icon on disk: `IconCache::get` accepts absolute paths, so the
         // test does not depend on whichever icon theme happens to be installed.
-        let dir = std::env::temp_dir().join("kdock-badge-test");
+        let dir = std::env::temp_dir().join("bananadock-badge-test");
         std::fs::create_dir_all(&dir).unwrap();
         let icon_path = dir.join("icon.png");
         let mut art = Pixmap::new(64, 64).unwrap();
@@ -1010,7 +1010,7 @@ mod tests {
         /// How much of the icon shows at the centre of the tile's artwork,
         /// with and without a capture in flight.
         fn icon_red(pending: bool) -> u8 {
-            let dir = std::env::temp_dir().join("kdock-waiting-test");
+            let dir = std::env::temp_dir().join("bananadock-waiting-test");
             std::fs::create_dir_all(&dir).unwrap();
             let icon_path = dir.join("icon.png");
             let mut art = Pixmap::new(64, 64).unwrap();

@@ -299,7 +299,7 @@ mod tests {
             None,
             &THEME,
         );
-        if let Ok(path) = std::env::var("KDOCK_DUMP_SETTINGS") {
+        if let Ok(path) = std::env::var("BANANADOCK_DUMP_SETTINGS") {
             pixmap.save_png(path).unwrap();
         }
         pixmap
