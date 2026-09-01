@@ -478,7 +478,7 @@ fn dump_frame(path: &str, width: u32, ids: &[String]) -> Result<(), Box<dyn std:
         config::Config::load(&config_path).apply_to(&mut metrics);
     }
     let metrics = metrics;
-    let palette = Palette::default();
+    let palette = dump_palette();
     let height = metrics.surface_depth().ceil() as u32;
 
     let index = LauncherIndex::load();
@@ -561,9 +561,28 @@ fn dump_frame(path: &str, width: u32, ids: &[String]) -> Result<(), Box<dyn std:
 
 /// Renders a sample context menu to a PNG, for checking type and spacing
 /// without a compositor.
+/// The palette the offline dump modes should draw with.
+///
+/// `BANANADOCK_APPEARANCE=light|dark` picks one; without it the dark dock, which
+/// is the default everywhere else. The dumps cannot ask the desktop the way the
+/// running dock does -- there is no session to ask -- so without this the light
+/// palette has no way of being looked at at all, and half the colours in
+/// `metrics.rs` cannot be checked against a reference.
+fn dump_palette() -> Palette {
+    match std::env::var("BANANADOCK_APPEARANCE").ok().as_deref() {
+        Some("light") => Palette::light(),
+        Some("dark") => Palette::dark(),
+        Some(other) => {
+            eprintln!("bananadock: {other:?} is not an appearance; using the dark dock");
+            Palette::default()
+        }
+        None => Palette::default(),
+    }
+}
+
 fn dump_menu(path: &str) -> Result<(), Box<dyn std::error::Error>> {
     let metrics = Metrics::default();
-    let palette = Palette::default();
+    let palette = dump_palette();
     let mut text = text::TextRenderer::new();
 
     let slot = Slot {

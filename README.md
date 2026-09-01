@@ -257,6 +257,8 @@ bananadock --dump-menu /tmp/menu.png
 `BANANADOCK_CURSOR=<x>` places a virtual pointer for `--dump-frame` so the
 magnification curve can be inspected, `BANANADOCK_SCALE=<n>` renders at an
 output scale, and `BANANADOCK_TRASH=full|empty` previews the Trash tile.
+`BANANADOCK_APPEARANCE=light|dark` picks the palette, which the dumps cannot
+ask the desktop for — without it the light colours cannot be looked at at all.
 `BANANADOCK_DEBUG=1` logs the window list as it changes.
 
 ## Status
