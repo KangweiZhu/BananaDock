@@ -26,11 +26,11 @@ const RUNNER_PATH: &str = "/WindowsRunner";
 const RUNNER_IFACE: &str = "org.kde.krunner1";
 
 /// Name the dock claims on the session bus for the script to push into.
-const OUR_SERVICE: &str = "org.kde.kdock";
+const OUR_SERVICE: &str = "org.kde.bananadock";
 const OUR_PATH: &str = "/Windows";
 
 /// Identifies our script to KWin, for loading and unloading.
-const PLUGIN_NAME: &str = "kdock-windows";
+const PLUGIN_NAME: &str = "bananadock-windows";
 
 const FS: char = '\x1f';
 const RS: char = '\x1e';
@@ -154,7 +154,7 @@ impl KwinWindows {
                 "Run",
                 &(runner_id.as_str(), ""),
             ) {
-                eprintln!("kdock: could not raise window: {e}");
+                eprintln!("bananadock: could not raise window: {e}");
             }
         });
     }
@@ -246,7 +246,7 @@ struct WindowsService {
     commands: Commands,
 }
 
-#[zbus::interface(name = "org.kde.kdock.Windows")]
+#[zbus::interface(name = "org.kde.bananadock.Windows")]
 impl WindowsService {
     /// Called by the KWin script whenever the window list changes.
     fn update(&self, snapshot: String) {
@@ -342,7 +342,7 @@ pub fn unload_script(conn: &zbus::blocking::Connection) {
         "unloadScript",
         &(PLUGIN_NAME,),
     ) {
-        eprintln!("kdock: could not unload the KWin script: {e}");
+        eprintln!("bananadock: could not unload the KWin script: {e}");
     }
 }
 
@@ -350,7 +350,7 @@ fn script_path() -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
     let dir = std::env::var_os("XDG_RUNTIME_DIR")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(std::env::temp_dir);
-    Ok(dir.join("kdock-kwin-windows.js"))
+    Ok(dir.join("bananadock-kwin-windows.js"))
 }
 
 #[cfg(test)]

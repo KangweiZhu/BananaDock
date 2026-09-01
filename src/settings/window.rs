@@ -68,9 +68,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let surface = compositor.create_surface(&qh);
     let window = xdg_shell.create_window(surface, WindowDecorations::RequestServer, &qh);
-    window.set_title("kdock settings");
+    window.set_title("BananaDock settings");
     // Matches the desktop entry, so the compositor can pair the window with it.
-    window.set_app_id("kdock");
+    window.set_app_id("bananadock");
     let size = (ui::WINDOW_WIDTH as u32, height as u32);
     window.set_min_size(Some(size));
     window.set_max_size(Some(size));
@@ -140,7 +140,7 @@ impl Settings {
     /// nothing to send it.
     fn commit_change(&mut self, key: &'static str, value: toml_edit::Value) {
         if let Err(e) = Config::save_settings(&self.path, &[(key, value)]) {
-            eprintln!("kdock: could not save {}: {e}", self.path.display());
+            eprintln!("bananadock: could not save {}: {e}", self.path.display());
             return;
         }
         self.config = Config::load(&self.path);
@@ -253,7 +253,7 @@ impl Settings {
             {
                 Ok(pair) => pair,
                 Err(e) => {
-                    eprintln!("kdock: could not allocate a buffer: {e}");
+                    eprintln!("bananadock: could not allocate a buffer: {e}");
                     return;
                 }
             }

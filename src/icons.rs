@@ -206,7 +206,7 @@ mod tests {
 
     #[test]
     fn ini_lookup_reads_the_right_group() {
-        let dir = std::env::temp_dir().join("kdock-ini-test");
+        let dir = std::env::temp_dir().join("bananadock-ini-test");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("kdeglobals");
         std::fs::write(

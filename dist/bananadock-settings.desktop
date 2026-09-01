@@ -1,14 +1,14 @@
 [Desktop Entry]
 Type=Application
-Name=kdock Settings
+Name=BananaDock Settings
 GenericName=Dock Settings
-Comment=Configure the kdock dock
+Comment=Configure the BananaDock dock
 # Rewritten by the install step to the absolute path of the installed binary.
-Exec=/usr/bin/kdock --settings
+Exec=/usr/bin/bananadock --settings
 Icon=configure
 Terminal=false
 Categories=Settings;DesktopSettings;
-# The same declarations as kdock.desktop, and they are not optional here.
+# The same declarations as bananadock.desktop, and they are not optional here.
 #
 # KWin decides what a client may use by tracing its process back to a desktop
 # entry -- by executable path, ignoring arguments. Two entries naming the same

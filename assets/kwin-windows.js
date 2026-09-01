@@ -1,4 +1,4 @@
-// Reports the window list to kdock, from inside KWin.
+// Reports the window list to bananadock, from inside KWin.
 //
 // KWin implements no foreign-toplevel Wayland protocol -- not the wlroots one,
 // not the ext one, and its own org_kde_plasma_window_management global is never
@@ -6,12 +6,12 @@
 // dock can see the window list at all, so this runs inside KWin and pushes the
 // state out over D-Bus.
 //
-// Loaded and unloaded by kdock itself through org.kde.kwin.Scripting; it is not
+// Loaded and unloaded by bananadock itself through org.kde.kwin.Scripting; it is not
 // meant to be installed by hand.
 
-var SERVICE = "org.kde.kdock";
+var SERVICE = "org.kde.bananadock";
 var PATH = "/Windows";
-var IFACE = "org.kde.kdock.Windows";
+var IFACE = "org.kde.bananadock.Windows";
 
 // Field and record separators. ASCII unit/record separators cannot occur in a
 // window title or class, so no escaping is needed.

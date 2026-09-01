@@ -1,6 +1,6 @@
 [Unit]
 Description=macOS-style dock for Wayland
-Documentation=https://github.com/kdock/kdock
+Documentation=https://github.com/KangweiZhu/BananaDock
 PartOf=graphical-session.target
 After=graphical-session.target
 # The dock is a Wayland client and cannot start before there is a compositor to
@@ -15,7 +15,7 @@ StartLimitBurst=30
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/kdock
+ExecStart=%h/.local/bin/bananadock
 # Not on-failure. Losing the compositor is an orderly shutdown -- the dock exits
 # zero -- so on-failure would leave the dock gone for the rest of the session
 # after every compositor restart, with nothing in the log to say why.

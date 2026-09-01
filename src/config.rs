@@ -142,9 +142,9 @@ impl Default for Config {
 }
 
 impl Config {
-    /// `$XDG_CONFIG_HOME/kdock/config.toml`, falling back to `~/.config`.
+    /// `$XDG_CONFIG_HOME/bananadock/config.toml`, falling back to `~/.config`.
     pub fn path() -> Option<PathBuf> {
-        Some(config_home()?.join("kdock").join("config.toml"))
+        Some(config_home()?.join("bananadock").join("config.toml"))
     }
 
     /// Reads the config, falling back to defaults.
@@ -158,13 +158,16 @@ impl Config {
             Ok(t) => t,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Self::default(),
             Err(e) => {
-                eprintln!("kdock: cannot read {}: {e}", path.display());
+                eprintln!("bananadock: cannot read {}: {e}", path.display());
                 return Self::default();
             }
         };
 
         Self::parse(&text).unwrap_or_else(|e| {
-            eprintln!("kdock: {} is invalid, using defaults: {e}", path.display());
+            eprintln!(
+                "bananadock: {} is invalid, using defaults: {e}",
+                path.display()
+            );
             Self::default()
         })
     }
@@ -221,7 +224,7 @@ impl Config {
     pub fn edge(&self) -> Edge {
         Edge::parse(&self.position).unwrap_or_else(|| {
             eprintln!(
-                "kdock: {:?} is not a dock position, using the bottom",
+                "bananadock: {:?} is not a dock position, using the bottom",
                 self.position
             );
             Edge::Bottom
@@ -241,7 +244,7 @@ impl Config {
         let parsed = Appearance::parse(name);
         if parsed.is_none() {
             eprintln!(
-                "kdock: {:?} is not an appearance, following the desktop",
+                "bananadock: {:?} is not an appearance, following the desktop",
                 self.appearance
             );
         }
@@ -428,7 +431,7 @@ mod tests {
 
     #[test]
     fn a_malformed_file_falls_back_to_defaults() {
-        let dir = std::env::temp_dir().join("kdock-cfg-test");
+        let dir = std::env::temp_dir().join("bananadock-cfg-test");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("config.toml");
         std::fs::write(&path, "this is not toml {{{").unwrap();
@@ -439,12 +442,12 @@ mod tests {
 
     #[test]
     fn a_missing_file_is_not_an_error() {
-        let path = std::env::temp_dir().join("kdock-does-not-exist-9e3a.toml");
+        let path = std::env::temp_dir().join("bananadock-does-not-exist-9e3a.toml");
         assert_eq!(Config::load(&path), Config::default());
     }
 
     fn temp_config(name: &str, body: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("kdock-save-{name}"));
+        let dir = std::env::temp_dir().join(format!("bananadock-save-{name}"));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("config.toml");
@@ -479,7 +482,7 @@ mod tests {
 
     #[test]
     fn saving_pinned_creates_a_file_that_does_not_exist_yet() {
-        let dir = std::env::temp_dir().join("kdock-save-fresh");
+        let dir = std::env::temp_dir().join("bananadock-save-fresh");
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("config.toml");
 
