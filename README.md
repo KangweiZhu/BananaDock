@@ -121,6 +121,41 @@ cargo build --release
 
 The binary lands at `target/release/bananadock`.
 
+## Installing on Arch
+
+[dist/PKGBUILD](dist/PKGBUILD) builds and installs the dock through pacman:
+
+```bash
+cd dist && makepkg -si
+```
+
+It packages the current default branch rather than a release, because there are
+no tagged releases yet; the version it reports (`0.1.0.rN.g<hash>`) counts
+commits so that upgrades still order correctly. The package installs the binary
+to `/usr/bin/bananadock`, both desktop entries to `/usr/share/applications`, and
+the user unit to `/usr/lib/systemd/user`, so the manual install below is not
+needed — start it with:
+
+```bash
+systemctl --user enable --now bananadock.service
+```
+
+The desktop entries matter more here than they look: their `Exec=` has to be
+the absolute path of the binary that actually runs or KWin withholds the window
+list, and `/usr/bin/bananadock` is exactly where the package puts it. That is
+one fewer thing to get wrong than in the manual install.
+
+To publish it to the AUR as `bananadock-git`, the PKGBUILD needs only its
+generated companion:
+
+```bash
+cd dist && makepkg --printsrcinfo > .SRCINFO
+```
+
+`.SRCINFO` is deliberately not committed here: it is a build artefact that goes
+stale the moment anything above it changes, and it belongs in the AUR
+repository rather than in this one.
+
 ## Running
 
 ```bash
@@ -143,9 +178,6 @@ systemctl --user enable --now bananadock.service
 The unit uses `Restart=always` rather than `on-failure` on purpose: the dock
 exits *zero* when the compositor goes away, so `on-failure` would leave it gone
 for the rest of the session after every compositor restart.
-
-```sh
-```
 
 ## Quitting, and the dock's own menu
 
