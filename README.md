@@ -201,9 +201,9 @@ which output to sit on, the pinned list) are edited in the file, or in the dock
 itself by dragging.
 
 
-`~/.config/bananadock/config.toml`, re-read the moment it changes — no restart. See
-[dist/config.example.toml](dist/config.example.toml) for every setting with its
-default.
+`~/.config/bananadock/config.toml`, re-read the moment it changes — no
+restart. See [dist/config.example.toml](dist/config.example.toml) for every
+setting with its default.
 
 Only preferences live in the config. The proportions measured off the reference
 — how large the artwork is relative to its tile, the panel height, the capsule
@@ -227,9 +227,9 @@ bananadock --dump-menu /tmp/menu.png
 ```
 
 `BANANADOCK_CURSOR=<x>` places a virtual pointer for `--dump-frame` so the
-magnification curve can be inspected, `BANANADOCK_SCALE=<n>` renders at an output
-scale, and `BANANADOCK_TRASH=full|empty` previews the Trash tile. `BANANADOCK_DEBUG=1`
-logs the window list as it changes.
+magnification curve can be inspected, `BANANADOCK_SCALE=<n>` renders at an
+output scale, and `BANANADOCK_TRASH=full|empty` previews the Trash tile.
+`BANANADOCK_DEBUG=1` logs the window list as it changes.
 
 ## Status
 
@@ -240,3 +240,11 @@ auto-hide, drag-to-reorder, and drops from other applications.
 Not done: the `[measure]`-tagged values in `src/metrics.rs` are still estimates
 awaiting calibration against a real reference screenshot, and moving the dock
 between screens at runtime requires a restart.
+
+## License
+
+Copyright (C) 2026 Kangwei Zhu.
+
+GPL-3.0-or-later. [LICENSE](LICENSE) is the licence text as published by the
+Free Software Foundation; `Cargo.toml` and the Arch package declare the same
+SPDX identifier.
