@@ -6,8 +6,14 @@
 //!
 //! Values are tagged with their provenance, which is what the calibration pass
 //! keys off: `[known]` from Apple's documented defaults, `[reference]` measured
-//! off a screenshot, `[derived]` computed from another value, `[measure]` still
+//! off a screenshot, `[derived]` computed from another value, `[system]` read
+//! out of a running macOS rather than documented or measured, `[measure]` still
 //! a starting estimate awaiting a reference.
+//!
+//! `[system]` is weaker than `[known]` on purpose. Apple documents the colours
+//! as advisory -- they "may fluctuate from release to release" -- so a value
+//! dumped from one macOS version is a good deal better than a guess and still
+//! not a specification.
 //!
 //! Ported from the Qt implementation's `qml/Metrics.qml` (`git show
 //! ee6971b:qml/Metrics.qml`). The ratios below were reverse-engineered from a
@@ -346,6 +352,14 @@ pub struct Palette {
     /// match. Until that is wired up, opaque looks less wrong than flatly
     /// translucent.
     pub menu_background: Color,
+    /// The menu's fill when the compositor is blurring what is behind it.
+    ///
+    /// A separate value rather than one translucent colour used everywhere:
+    /// translucency with nothing blurred behind it is not a frosted menu, it is
+    /// a menu you can read the window through. Where the effect is missing the
+    /// opaque `menu_background` is used instead, which is the same way the rest
+    /// of the dock degrades.
+    pub menu_background_blurred: Color,
     pub menu_border: Color,
     pub menu_text: Color,
     pub menu_highlight: Color,
@@ -413,6 +427,13 @@ impl Palette {
             drop_target: Color::rgba(0.0, 0.0, 0.0, 0.12),
 
             menu_background: Color::rgba(0.96, 0.96, 0.97, 0.98),
+            // [measure] macOS menus are a blurred material, not a fill, and
+            // Apple publishes no number for it -- the recipes live in private
+            // CoreUI data. So this is an estimate of the right *kind* of thing
+            // rather than a measurement: light enough to read black text on,
+            // sheer enough that the blur behind it is the point. Awaiting
+            // calibration against a reference, like the other [measure] values.
+            menu_background_blurred: Color::rgba(0.96, 0.96, 0.97, 0.76),
             menu_border: Color::rgba(0.0, 0.0, 0.0, 0.12),
             menu_text: Color::rgba(0.0, 0.0, 0.0, 0.85),
             // [system] `NSColor.selectedContentBackgroundColor`, light
@@ -438,6 +459,10 @@ impl Palette {
             drop_target: Color::rgba(1.0, 1.0, 1.0, 0.22),
 
             menu_background: Color::rgba(0.16, 0.16, 0.17, 0.98),
+            // [measure] As above. The dark menu carries a little more of its
+            // own fill: white text over a blurred bright window needs the
+            // backing that black text over a blurred dark one does not.
+            menu_background_blurred: Color::rgba(0.16, 0.16, 0.17, 0.80),
             menu_border: Color::rgba(1.0, 1.0, 1.0, 0.12),
             menu_text: Color::rgba(1.0, 1.0, 1.0, 0.92),
             // [system] The same colour in the dark appearance: sRGB 0, 88, 208.
@@ -487,6 +512,31 @@ mod tests {
             "the dark appearance's selection should be the deeper blue"
         );
         assert_eq!(dark.menu_highlight_text.r, light.menu_highlight_text.r);
+    }
+
+    /// The blurred fill is the one the compositor's blur reads through, so it
+    /// has to be sheerer than the opaque fallback -- and still solid enough to
+    /// read text on. A blurred fill that matched the fallback would mean the
+    /// menu had been given a blur it then covered up entirely.
+    #[test]
+    fn the_blurred_menu_is_sheerer_than_the_opaque_one() {
+        for appearance in [Appearance::Dark, Appearance::Light] {
+            let p = Palette::for_appearance(appearance);
+            assert!(
+                p.menu_background_blurred.a < p.menu_background.a,
+                "{appearance:?}: the blurred fill must let the blur through"
+            );
+            assert!(
+                p.menu_background_blurred.a > 0.6,
+                "{appearance:?}: a fill of {} is too sheer to read text on",
+                p.menu_background_blurred.a
+            );
+            // Same colour, different sheerness: the material does not change
+            // hue when the compositor happens to support blurring it.
+            assert_eq!(p.menu_background_blurred.r, p.menu_background.r);
+            assert_eq!(p.menu_background_blurred.g, p.menu_background.g);
+            assert_eq!(p.menu_background_blurred.b, p.menu_background.b);
+        }
     }
 
     /// The selection is not the accent swatch. macOS fills a selected row with

@@ -72,6 +72,9 @@ use shell::{LayerDock, MenuPopup, PopupShell, ScaleHandler, SurfaceScale};
 use text::TextRenderer;
 use windows::{wlr::ForeignToplevelHandler, ForeignToplevelManager, KwinWindows, WindowSource};
 
+type BackgroundEffectSurface =
+    wayland_protocols::ext::background_effect::v1::client::ext_background_effect_surface_v1::ExtBackgroundEffectSurfaceV1;
+
 /// Horizontal slices per rounded end of the blur region. At the panel's usual
 /// height each slice is a couple of pixels tall, which is below the point where
 /// the stepping is visible against a blurred background.
@@ -231,6 +234,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         scale,
         background_effect,
         blur_surface,
+        menu_blur: None,
         toplevels,
         plasma,
         kwin,
@@ -647,9 +651,13 @@ struct App {
     /// `ext-background-effect-v1`, where the panel is simply not blurred --
     /// Hyprland does its own via `blurls`, others do none.
     background_effect: BackgroundEffectState,
-    blur_surface: Option<
-        wayland_protocols::ext::background_effect::v1::client::ext_background_effect_surface_v1::ExtBackgroundEffectSurfaceV1,
-    >,
+    blur_surface: Option<BackgroundEffectSurface>,
+    /// The same effect, for the menu's own surface.
+    ///
+    /// Held for as long as the menu is open: dropping the object takes the
+    /// blur with it. `None` means the compositor would not give one, and the
+    /// menu falls back to an opaque fill.
+    menu_blur: Option<BackgroundEffectSurface>,
     toplevels: ForeignToplevelManager,
     /// KWin's own protocol, when its .desktop grant is in place.
     plasma: Option<windows::PlasmaWindows>,
@@ -1372,6 +1380,7 @@ impl App {
             self.seat.as_ref().map(|seat| (seat, serial)),
         ) {
             Ok(popup) => {
+                self.blur_menu(&popup, qh);
                 self.menu_items = items;
                 self.menu_layout = layout;
                 self.open_menu = Some(popup);
@@ -1441,7 +1450,46 @@ impl App {
         self.seat = Some(seat);
     }
 
+    /// Asks the compositor to blur what is behind the menu.
+    ///
+    /// macOS menus, the Dock's included, are a translucent blurred material
+    /// rather than a panel of colour. The dock's own capsule already gets this
+    /// treatment; the menu is a separate surface and needs asking separately.
+    /// The region is the menu's rounded rectangle, so the blur does not square
+    /// off its corners.
+    ///
+    /// Failing is not an error. `ext-background-effect-v1` is missing on most
+    /// compositors, and a menu that cannot be blurred is drawn opaque instead.
+    fn blur_menu(&mut self, popup: &MenuPopup, qh: &QueueHandle<Self>) {
+        self.menu_blur = None;
+
+        let Ok(effect) = self
+            .background_effect
+            .get_background_effect(popup.wl_surface(), qh)
+        else {
+            return;
+        };
+        let Ok(region) = Region::new(&self.compositor) else {
+            return;
+        };
+
+        let rect = tiny_skia::Rect::from_xywh(0.0, 0.0, popup.width as f32, popup.height as f32);
+        let radius = self.metrics.pt(self.metrics.menu_radius);
+        if let Some(rect) = rect {
+            for (x, y, w, h) in render::capsule_region(rect, radius, BLUR_CAP_SLICES) {
+                region.add(x, y, w, h);
+            }
+        }
+        effect.set_blur_region(Some(region.wl_region()));
+        self.menu_blur = Some(effect);
+    }
+
     fn close_menu(&mut self) {
+        // Before the surface goes: the object refers to it, and outliving it
+        // would leave the compositor blurring a surface that is gone.
+        if let Some(effect) = self.menu_blur.take() {
+            effect.destroy();
+        }
         self.open_menu = None;
         self.menu_items.clear();
         self.set_keyboard_focusable(false);
@@ -1492,6 +1540,12 @@ impl App {
             return;
         };
 
+        // Sheer over the compositor's blur, opaque without it.
+        let mut palette = self.palette;
+        if self.menu_blur.is_some() {
+            palette.menu_background = palette.menu_background_blurred;
+        }
+
         render::draw_menu(
             render::Target {
                 pixmap: &mut pixmap,
@@ -1500,7 +1554,7 @@ impl App {
                 slide_out: 0.0,
             },
             &self.metrics,
-            &self.palette,
+            &palette,
             &self.menu_items,
             &self.menu_layout,
             popup.highlighted,
