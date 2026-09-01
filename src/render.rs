@@ -1440,6 +1440,59 @@ mod tests {
         );
     }
 
+    /// A menu drawn with the blurred fill has to reach the screen translucent,
+    /// or the compositor is blurring what is behind a surface that then covers
+    /// it up. Nothing else in the dock can catch this: the offline dumps have
+    /// no compositor to blur anything, so the only thing checkable without one
+    /// is that the alpha survives as far as the pixels.
+    #[test]
+    fn the_blurred_menu_reaches_the_pixels_translucent() {
+        use crate::menu::{layout_menu, MenuAction, MenuItem};
+
+        let m = Metrics::default();
+        let items = vec![MenuItem {
+            label: "Quit".into(),
+            action: Some(MenuAction::Quit),
+            checked: false,
+        }];
+        let mut text = TextRenderer::new();
+        let font = m.pt(m.menu_font_size);
+        let layout = layout_menu(&items, &m, |s| text.measure(s, font));
+
+        let mut palette = Palette::light();
+        palette.menu_background = palette.menu_background_blurred;
+
+        let (w, h) = (layout.width.ceil() as u32, layout.height.ceil() as u32);
+        let mut pixmap = Pixmap::new(w, h).expect("a menu-sized pixmap");
+        draw_menu(
+            Target {
+                pixmap: &mut pixmap,
+                logical: (w as f32, h as f32),
+                scale: 1.0,
+                slide_out: 0.0,
+            },
+            &m,
+            &palette,
+            &items,
+            &layout,
+            None,
+            &mut text,
+        );
+
+        // Well inside the rounded corner, and off the text.
+        let px = pixmap.pixel(w / 2, 2).expect("a pixel inside the menu");
+        let expected = (palette.menu_background_blurred.a * 255.0).round() as u8;
+        assert!(
+            px.alpha().abs_diff(expected) <= 2,
+            "the menu was drawn at alpha {} rather than {expected}",
+            px.alpha()
+        );
+        assert!(
+            px.alpha() < 250,
+            "the menu is effectively opaque; the blur behind it would be wasted"
+        );
+    }
+
     fn slot(running: bool) -> Slot {
         Slot {
             capture_key: None,
