@@ -108,4 +108,9 @@ package() {
     install -Dm644 dist/config.example.toml \
         "$pkgdir/usr/share/doc/$_pkgname/config.example.toml"
     install -Dm644 README.md "$pkgdir/usr/share/doc/$_pkgname/README.md"
+
+    # LICENSE is deliberately not installed. GPL-3.0-or-later is one of the
+    # licences the `licenses` package already ships, under
+    # /usr/share/licenses/spdx/, and Arch asks packages not to duplicate those.
+    # The repository's own copy is still there for anyone reading the source.
 }
