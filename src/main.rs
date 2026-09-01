@@ -1461,7 +1461,15 @@ impl App {
     /// Failing is not an error. `ext-background-effect-v1` is missing on most
     /// compositors, and a menu that cannot be blurred is drawn opaque instead.
     fn blur_menu(&mut self, popup: &MenuPopup, qh: &QueueHandle<Self>) {
-        self.menu_blur = None;
+        // Destroyed, not dropped. Dropping a Wayland proxy releases the local
+        // handle and sends nothing, so the compositor would keep an effect
+        // object bound to the menu surface that is about to be replaced -- and
+        // an effect outliving its surface is the protocol's `surface_destroyed`
+        // error, which disconnects the client. Opening a menu with one already
+        // open is enough to reach it.
+        if let Some(effect) = self.menu_blur.take() {
+            effect.destroy();
+        }
 
         let Ok(effect) = self
             .background_effect
