@@ -73,7 +73,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dst = pixmap.data_mut();
     for y in 0..height as usize {
         let row = &raw[y * stride as usize..][..width as usize * 4];
-        for (x, px) in row.chunks_exact(4).enumerate() {
+        for (x, px) in row.as_chunks::<4>().0.iter().enumerate() {
             let o = (y * width as usize + x) * 4;
             dst[o] = px[2];
             dst[o + 1] = px[1];

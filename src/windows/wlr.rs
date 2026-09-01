@@ -221,7 +221,9 @@ where
 /// The `state` event carries its flags as an array of native-endian `u32`s
 /// rather than a bitfield, so it has to be unpacked by hand.
 fn decode_states(raw: &[u8]) -> Vec<handle::State> {
-    raw.chunks_exact(4)
+    raw.as_chunks::<4>()
+        .0
+        .iter()
         .filter_map(|c| {
             let v = u32::from_ne_bytes([c[0], c[1], c[2], c[3]]);
             handle::State::try_from(v).ok()
