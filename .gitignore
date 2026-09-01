@@ -1,1 +1,9 @@
 /target
+
+# makepkg works in place, so building the package leaves these beside the
+# PKGBUILD. .SRCINFO is generated too, and belongs in the AUR repository.
+/dist/src/
+/dist/pkg/
+/dist/*.pkg.tar.*
+/dist/*.log
+/dist/.SRCINFO

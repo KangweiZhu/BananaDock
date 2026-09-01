@@ -1,0 +1,111 @@
+# Maintainer: Kangwei (Anicaa) Zhu <anicaazhu@gmail.com>
+#
+# Build and install with pacman:
+#
+#     cd dist && makepkg -si
+#
+# This is the VCS flavour: it packages whatever the default branch currently
+# points at, which is the only thing that can be packaged while the project has
+# no tagged releases. Once there is a tag, a second `bananadock` package is a
+# small edit of this one -- drop the `-git` suffix and the `pkgver()`, set
+# `pkgver` by hand, and point `source` at
+# `$url/archive/v$pkgver.tar.gz` with a real checksum.
+
+pkgname=bananadock-git
+_pkgname=bananadock
+# Overwritten by pkgver() during the build; only a starting point.
+pkgver=0.1.0.r0.g0000000
+pkgrel=1
+pkgdesc="A macOS-style dock for Wayland"
+arch=('x86_64' 'aarch64')
+url="https://github.com/KangweiZhu/BananaDock"
+license=('GPL-3.0-or-later')
+
+# What the built binary actually pulls in, which is less than the build
+# instructions suggest. `ldd` on the packaged release binary names libc, libm
+# and libgcc_s and nothing else: the Wayland protocol is spoken by
+# wayland-backend's Rust implementation rather than by libwayland, and the
+# `-lxkbcommon` below is dropped again at link time because nothing in the dock
+# reaches the keyboard code that would use it. fontconfig is here for its
+# *configuration files* -- fontdb parses them with a Rust parser to find a font,
+# and finds nothing useful without them.
+depends=('glibc' 'gcc-libs' 'fontconfig')
+# libxkbcommon is needed to *link* and not to run: smithay-client-toolkit's
+# build script emits `cargo:rustc-link-lib=xkbcommon` unconditionally, so the
+# library has to be present or the build fails -- in a clean chroot especially,
+# where it is not pulled in by anything else. It does not belong in depends;
+# check `ldd` again before moving it there.
+makedepends=('git' 'cargo' 'libxkbcommon')
+# The text tests shape real strings, so they need a font installed to find.
+checkdepends=('ttf-dejavu')
+optdepends=(
+    'kwin: window list, window activation and window thumbnails on Plasma'
+    'ttf-dejavu: a font for the hover labels and the menu, if none is installed'
+)
+provides=("$_pkgname")
+conflicts=("$_pkgname")
+source=("$_pkgname::git+$url.git")
+sha256sums=('SKIP')
+
+pkgver() {
+    cd "$srcdir/$_pkgname"
+    # The crate's own version, then how far past it HEAD is. Keeps upgrades
+    # ordered even between releases, as `pacman -Q` compares left to right.
+    printf '%s.r%s.g%s' \
+        "$(awk -F'"' '/^version = /{print $2; exit}' Cargo.toml)" \
+        "$(git rev-list --count HEAD)" \
+        "$(git rev-parse --short HEAD)"
+}
+
+prepare() {
+    cd "$srcdir/$_pkgname"
+    export RUSTUP_TOOLCHAIN=stable
+    # Vendor every dependency now, so build() and check() can run with
+    # --frozen and touch the network no further.
+    cargo fetch --locked --target "$(rustc -vV | sed -n 's/^host: //p')"
+}
+
+build() {
+    cd "$srcdir/$_pkgname"
+    export RUSTUP_TOOLCHAIN=stable
+    export CARGO_TARGET_DIR=target
+    cargo build --frozen --release
+}
+
+check() {
+    cd "$srcdir/$_pkgname"
+    export RUSTUP_TOOLCHAIN=stable
+    export CARGO_TARGET_DIR=target
+    # No compositor here, so this is the offline half of the suite: layout,
+    # metrics, configuration parsing and the rendered frames. Behaviour against
+    # a real compositor is checked by hand.
+    cargo test --frozen --release
+}
+
+package() {
+    cd "$srcdir/$_pkgname"
+
+    install -Dm755 target/release/$_pkgname "$pkgdir/usr/bin/$_pkgname"
+
+    # The desktop entries are not decoration. KWin traces a client's process
+    # back to an entry by the absolute path in Exec=, and grants
+    # org_kde_plasma_window_management and org.kde.KWin.ScreenShot2 only on a
+    # match -- without them the dock silently loses its window list and its
+    # thumbnails. The shipped entries already name /usr/bin/bananadock, which is
+    # exactly where this package puts the binary, so they install unedited.
+    install -Dm644 dist/$_pkgname.desktop \
+        "$pkgdir/usr/share/applications/$_pkgname.desktop"
+    install -Dm644 dist/$_pkgname-settings.desktop \
+        "$pkgdir/usr/share/applications/$_pkgname-settings.desktop"
+
+    # The shipped unit starts ~/.local/bin/bananadock, which is right for a
+    # manual install and wrong for a packaged one.
+    sed 's|^ExecStart=.*|ExecStart=/usr/bin/bananadock|' dist/$_pkgname.service \
+        > "$srcdir/$_pkgname.service"
+    install -Dm644 "$srcdir/$_pkgname.service" \
+        "$pkgdir/usr/lib/systemd/user/$_pkgname.service"
+
+    install -Dm644 dist/config.example.toml \
+        "$pkgdir/usr/share/doc/$_pkgname/config.example.toml"
+    install -Dm644 README.md "$pkgdir/usr/share/doc/$_pkgname/README.md"
+}
