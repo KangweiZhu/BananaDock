@@ -173,6 +173,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
+name = "bananadock"
+version = "0.1.0"
+dependencies = [
+ "calloop",
+ "cosmic-text",
+ "freedesktop-desktop-entry",
+ "freedesktop-icons",
+ "image",
+ "notify",
+ "resvg",
+ "serde",
+ "smithay-client-toolkit",
+ "tiny-skia",
+ "toml",
+ "toml_edit",
+ "wayland-backend",
+ "wayland-client",
+ "wayland-protocols",
+ "wayland-protocols-plasma",
+ "wayland-protocols-wlr",
+ "zbus",
+]
+
+[[package]]
 name = "base64"
 version = "0.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -812,30 +836,6 @@ dependencies = [
  "cfg-if",
  "futures-util",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "kdock"
-version = "0.1.0"
-dependencies = [
- "calloop",
- "cosmic-text",
- "freedesktop-desktop-entry",
- "freedesktop-icons",
- "image",
- "notify",
- "resvg",
- "serde",
- "smithay-client-toolkit",
- "tiny-skia",
- "toml",
- "toml_edit",
- "wayland-backend",
- "wayland-client",
- "wayland-protocols",
- "wayland-protocols-plasma",
- "wayland-protocols-wlr",
- "zbus",
 ]
 
 [[package]]

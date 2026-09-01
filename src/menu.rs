@@ -91,7 +91,7 @@ pub fn build_dock_menu(magnification: bool, auto_hide: bool) -> Vec<MenuItem> {
         MenuItem::separator(),
         MenuItem::action("Dock Settings…", MenuAction::OpenSettings),
         MenuItem::separator(),
-        MenuItem::action("Quit kdock", MenuAction::QuitDock),
+        MenuItem::action("Quit BananaDock", MenuAction::QuitDock),
     ]
 }
 

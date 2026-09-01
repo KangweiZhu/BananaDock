@@ -1,6 +1,6 @@
-# kdock configuration.
+# bananadock configuration.
 #
-# Copy to ~/.config/kdock/config.toml. Every value below is the default, so an
+# Copy to ~/.config/bananadock/config.toml. Every value below is the default, so an
 # empty file behaves exactly like this one and you only need to write the lines
 # you want to change.
 #

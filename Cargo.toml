@@ -1,5 +1,5 @@
 [package]
-name = "kdock"
+name = "bananadock"
 version = "0.1.0"
 edition = "2021"
 description = "A macOS-style dock for Wayland compositors that support wlr-layer-shell"

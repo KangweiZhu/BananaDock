@@ -1,4 +1,4 @@
-# kdock
+# BananaDock
 
 A macOS-style dock for Wayland.
 
@@ -119,12 +119,12 @@ fontconfig.
 cargo build --release
 ```
 
-The binary lands at `target/release/kdock`.
+The binary lands at `target/release/bananadock`.
 
 ## Running
 
 ```bash
-./target/release/kdock
+./target/release/bananadock
 ```
 
 To start it with the session, install the user service:
@@ -132,12 +132,12 @@ To start it with the session, install the user service:
 ```bash
 # The desktop entry is what earns the dock its window list on KWin, and its
 # Exec= has to name the installed binary by absolute path.
-install -Dm755 target/release/kdock ~/.local/bin/kdock
-sed "s|^Exec=.*|Exec=$HOME/.local/bin/kdock|" dist/kdock.desktop \
-    > ~/.local/share/applications/kdock.desktop
+install -Dm755 target/release/bananadock ~/.local/bin/bananadock
+sed "s|^Exec=.*|Exec=$HOME/.local/bin/bananadock|" dist/bananadock.desktop \
+    > ~/.local/share/applications/bananadock.desktop
 
-install -Dm644 dist/kdock.service ~/.config/systemd/user/kdock.service
-systemctl --user enable --now kdock.service
+install -Dm644 dist/bananadock.service ~/.config/systemd/user/bananadock.service
+systemctl --user enable --now bananadock.service
 ```
 
 The unit uses `Restart=always` rather than `on-failure` on purpose: the dock
@@ -151,15 +151,15 @@ for the rest of the session after every compositor restart.
 
 Right-click the dock -- the separator, or any part of the panel that is not an
 icon -- for magnification and auto-hide toggles, the settings window, and
-**Quit kdock**. The dock has no window and no tray icon, so this is the way out
-short of `systemctl --user stop kdock.service`.
+**Quit BananaDock**. The dock has no window and no tray icon, so this is the
+way out short of `systemctl --user stop bananadock.service`.
 
 ## Configuration
 
 A settings window covers the common options:
 
 ```sh
-kdock --settings
+bananadock --settings
 ```
 
 It writes straight to the configuration file below -- there is no separate
@@ -169,7 +169,7 @@ which output to sit on, the pinned list) are edited in the file, or in the dock
 itself by dragging.
 
 
-`~/.config/kdock/config.toml`, re-read the moment it changes — no restart. See
+`~/.config/bananadock/config.toml`, re-read the moment it changes — no restart. See
 [dist/config.example.toml](dist/config.example.toml) for every setting with its
 default.
 
@@ -190,13 +190,13 @@ compositor, which is also how the layout is compared against a reference
 screenshot:
 
 ```bash
-kdock --dump-frame /tmp/dock.png 900 org.kde.dolphin firefox code
-kdock --dump-menu /tmp/menu.png
+bananadock --dump-frame /tmp/dock.png 900 org.kde.dolphin firefox code
+bananadock --dump-menu /tmp/menu.png
 ```
 
-`KDOCK_CURSOR=<x>` places a virtual pointer for `--dump-frame` so the
-magnification curve can be inspected, `KDOCK_SCALE=<n>` renders at an output
-scale, and `KDOCK_TRASH=full|empty` previews the Trash tile. `KDOCK_DEBUG=1`
+`BANANADOCK_CURSOR=<x>` places a virtual pointer for `--dump-frame` so the
+magnification curve can be inspected, `BANANADOCK_SCALE=<n>` renders at an output
+scale, and `BANANADOCK_TRASH=full|empty` previews the Trash tile. `BANANADOCK_DEBUG=1`
 logs the window list as it changes.
 
 ## Status
