@@ -1738,8 +1738,18 @@ impl App {
         ((self.row_frame().length() - (content + pad * 2.0)) / 2.0).max(0.0) + pad
     }
 
+    /// Which slot is at a distance already measured along the row.
     fn slot_at(&self, along: f32) -> Option<usize> {
         self.geometry().hit(along - self.row_origin())
+    }
+
+    /// Which slot is at a raw surface position.
+    ///
+    /// For callers that have the position as it arrived from the compositor and
+    /// have not reduced it to a distance along the row yet.
+    fn slot_at_surface(&self, x: f32, y: f32) -> Option<usize> {
+        self.geometry()
+            .hit_surface(&self.row_frame(), self.row_origin(), x, y)
     }
 
     /// Promotes a press into a drag once it has moved, and tracks it after.
@@ -1795,12 +1805,16 @@ impl App {
 
     /// Notes which icon an external drag is hovering, and tells the source we
     /// will take a file list.
+    ///
+    /// Both coordinates are needed, not just `x`: on a dock at the left or
+    /// right edge it is `y` that says how far down the row the pointer is.
     fn update_drop_target(
         &mut self,
         _device: &wayland_client::protocol::wl_data_device::WlDataDevice,
         x: f64,
+        y: f64,
     ) {
-        let target = self.slot_at(x as f32);
+        let target = self.slot_at_surface(x as f32, y as f32);
         if let Some(offer) = self
             .data_device
             .as_ref()
@@ -2174,10 +2188,10 @@ impl DataDeviceHandler for App {
         _: &QueueHandle<Self>,
         device: &wayland_client::protocol::wl_data_device::WlDataDevice,
         x: f64,
-        _y: f64,
+        y: f64,
         _surface: &wl_surface::WlSurface,
     ) {
-        self.update_drop_target(device, x);
+        self.update_drop_target(device, x, y);
     }
 
     fn motion(
@@ -2186,9 +2200,9 @@ impl DataDeviceHandler for App {
         _: &QueueHandle<Self>,
         device: &wayland_client::protocol::wl_data_device::WlDataDevice,
         x: f64,
-        _y: f64,
+        y: f64,
     ) {
-        self.update_drop_target(device, x);
+        self.update_drop_target(device, x, y);
     }
 
     fn leave(
