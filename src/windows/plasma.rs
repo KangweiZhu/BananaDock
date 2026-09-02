@@ -134,32 +134,46 @@ impl PlasmaWindows {
     fn snapshot(&self, id: ToplevelId) -> Option<Toplevel> {
         let handle = self.handles.get(&id)?;
         let data = handle.data::<PlasmaWindowData>()?;
-        let inner = data.0.lock().ok()?;
 
-        // A window is only shown once KWin says its opening burst is done, and
-        // never if it asked to stay out of task bars.
-        if !inner.ready || inner.unmapped || inner.state & state::SKIPTASKBAR != 0 {
-            return None;
-        }
+        // Everything this window has to say is copied out first, and the guard
+        // is gone before the parent is resolved. `id_of_uuid` locks every
+        // window in turn -- this one included -- and a `Mutex` locked twice
+        // from the same thread does not return.
+        let (app_id, title, flags, uuid, parent_uuid) = {
+            let inner = data.0.lock().ok()?;
+
+            // A window is only shown once KWin says its opening burst is done,
+            // and never if it asked to stay out of task bars.
+            if !inner.ready || inner.unmapped || inner.state & state::SKIPTASKBAR != 0 {
+                return None;
+            }
+
+            (
+                inner.app_id.clone(),
+                inner.title.clone(),
+                inner.state,
+                inner.uuid.clone(),
+                inner.parent_uuid.clone(),
+            )
+        };
 
         Some(Toplevel {
             id,
-            app_id: inner.app_id.clone(),
-            title: inner.title.clone(),
-            active: inner.state & state::ACTIVE != 0,
-            minimized: inner.state & state::MINIMIZED != 0,
+            app_id,
+            title,
+            active: flags & state::ACTIVE != 0,
+            minimized: flags & state::MINIMIZED != 0,
             // Parents arrive as uuids; resolve to our id where the parent is
             // itself a window we track.
-            parent: inner
-                .parent_uuid
-                .as_deref()
-                .and_then(|uuid| self.id_of_uuid(uuid)),
+            parent: parent_uuid.as_deref().and_then(|uuid| self.id_of_uuid(uuid)),
             // KWin's own window id, which is what its screenshot interface
             // takes.
-            capture_key: Some(inner.uuid.clone()),
+            capture_key: Some(uuid),
         })
     }
 
+    /// Callers must hold no window's lock: this takes each in turn, and one
+    /// held across the call is one this would wait on for ever.
     fn id_of_uuid(&self, uuid: &str) -> Option<ToplevelId> {
         self.handles.iter().find_map(|(id, handle)| {
             let data = handle.data::<PlasmaWindowData>()?;
@@ -275,6 +289,18 @@ where
         let id = proxy.id().protocol_id();
         let mut gone = false;
 
+        // Read before this window's own lock is taken. The parent is some
+        // other window's data -- or, if KWin ever names a window its own
+        // parent, this window's -- and taking a second window's lock
+        // underneath the first is how the dock came to wait on itself.
+        let parent_uuid = match &event {
+            window::Event::ParentWindow { parent } => parent.as_ref().and_then(|p| {
+                p.data::<PlasmaWindowData>()
+                    .and_then(|d| d.0.lock().ok().map(|i| i.uuid.clone()))
+            }),
+            _ => None,
+        };
+
         if let Ok(mut inner) = self.0.lock() {
             match event {
                 window::Event::TitleChanged { title } => inner.title = title,
@@ -282,12 +308,7 @@ where
                 // which is exactly what the launcher index matches on.
                 window::Event::AppIdChanged { app_id } => inner.app_id = app_id,
                 window::Event::StateChanged { flags } => inner.state = flags,
-                window::Event::ParentWindow { parent } => {
-                    inner.parent_uuid = parent.and_then(|p| {
-                        p.data::<PlasmaWindowData>()
-                            .and_then(|d| d.0.lock().ok().map(|i| i.uuid.clone()))
-                    });
-                }
+                window::Event::ParentWindow { .. } => inner.parent_uuid = parent_uuid,
                 window::Event::InitialState => inner.ready = true,
                 window::Event::Unmapped => {
                     inner.unmapped = true;
