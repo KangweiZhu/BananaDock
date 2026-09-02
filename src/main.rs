@@ -410,6 +410,33 @@ enum Watched {
     Appearance(appearance::Appearance),
 }
 
+/// Whether an event means the watched thing actually changed.
+///
+/// inotify reports reads as well as writes: `IN_OPEN` and `IN_CLOSE_NOWRITE`
+/// are both in the mask `notify` asks for. The dock answers a change by reading
+/// the very path it watches, so acting on a read feeds the watcher its own
+/// event -- the reload opens the file, the open comes back as an event, and the
+/// event schedules another reload. That loop saturates the event loop, and a
+/// dock that never gets back to its Wayland queue stops answering clicks.
+///
+/// Only real modifications count, then. Anything else -- an open, a close, a
+/// bare `Any` from a backend that could not be more specific -- is ignored,
+/// which costs at worst a missed update and never spins.
+fn is_change(kind: &notify::EventKind) -> bool {
+    use notify::event::{EventKind, ModifyKind};
+
+    match kind {
+        EventKind::Create(_) | EventKind::Remove(_) => true,
+        // Metadata alone is excluded on purpose: reading touches the access
+        // time, and a timestamp change is reported as a metadata modification,
+        // which would put the loop straight back.
+        EventKind::Modify(ModifyKind::Metadata(_)) => false,
+        // A rename counts -- it is how an editor saves over the config file.
+        EventKind::Modify(_) => true,
+        _ => false,
+    }
+}
+
 /// Watches one file for changes.
 ///
 /// The *parent directory* is watched, not the file: editors overwrite by
@@ -429,7 +456,7 @@ fn watch_file(
 
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         let Ok(event) = res else { return };
-        if event.paths.contains(&target) {
+        if is_change(&event.kind) && event.paths.contains(&target) {
             let _ = tx.send(what.clone());
         }
     })
@@ -456,7 +483,7 @@ fn watch_dir(
     }
 
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-        if res.is_ok() {
+        if res.is_ok_and(|event| is_change(&event.kind)) {
             let _ = tx.send(what.clone());
         }
     })
@@ -2832,3 +2859,40 @@ impl ProvidesRegistryState for App {
 }
 
 smithay_client_toolkit::delegate_dispatch2!(App);
+
+#[cfg(test)]
+mod tests {
+    use super::is_change;
+    use notify::event::{
+        AccessKind, AccessMode, CreateKind, DataChange, EventKind, MetadataKind, ModifyKind,
+        RemoveKind, RenameMode,
+    };
+
+    /// The bug this guards against: the dock reloads by reading the very path
+    /// it watches, so a reload that answered its own read would never stop.
+    #[test]
+    fn reading_the_watched_path_is_not_a_change() {
+        for kind in [
+            EventKind::Access(AccessKind::Open(AccessMode::Read)),
+            EventKind::Access(AccessKind::Read),
+            EventKind::Access(AccessKind::Close(AccessMode::Read)),
+            // Reading updates the access time, which arrives as metadata.
+            EventKind::Modify(ModifyKind::Metadata(MetadataKind::AccessTime)),
+        ] {
+            assert!(!is_change(&kind), "{kind:?} would feed the watcher itself");
+        }
+    }
+
+    #[test]
+    fn edits_still_come_through() {
+        for kind in [
+            EventKind::Create(CreateKind::File),
+            EventKind::Modify(ModifyKind::Data(DataChange::Content)),
+            // How an editor saves: write a temporary file, rename it over.
+            EventKind::Modify(ModifyKind::Name(RenameMode::To)),
+            EventKind::Remove(RemoveKind::File),
+        ] {
+            assert!(is_change(&kind), "{kind:?} should reload");
+        }
+    }
+}
